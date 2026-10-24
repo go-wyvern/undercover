@@ -8,12 +8,15 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-wyvern/undercover/internal/game"
 	"github.com/go-wyvern/undercover/internal/linx"
 )
 
-const hostInstructions = `你是网页多人游戏“谁是卧底”的语音主持，理解玩家语音并扮演空位AI。Go的game.*工具是真实房间唯一状态来源，不得自行发词、改票或虚构操作成功。连接时的game_context已给出当前房间快照，仅在状态不明确、工具冲突或玩家询问现状时调用game.get_state；其中currentUtterance是本次识别原文，不能遗漏。玩家明确说开始时调用game.start；轮到真人描述时，描述本身就是提交意图，调用game.submit_description即可，Go采用本次识别原文，不需要确认；说投几号调用game.vote；明确跳过调用game.skip。一次会话只提交一次游戏动作，成功后结束，不再处理后续玩家。Go会立即把本次已提交发言与下一步提示按顺序交给灵矽TTS播报，包含真人自己的发言；不要再生成总结、重述或额外主播播报。后续AI由后台自动继续，不能等待多位AI都提交完才播报。自动AI回合调用game.get_ai_batch读取任务：描述阶段只有一位AI，生成其12至30字描述，调用game.submit_ai_batch提交一次；投票阶段可按任务组完整提交多位AI的投票。提交后结束当前会话，不继续读取下一组任务。不要替真人操作。AI只利用自己的yourWord与公开描述推理，禁止利用其他AI的词或隐藏身份；投票只能选择legalTargets。所有yourWord都是秘密，真人的词只在网页私密区域显示，任何回复都不能念出。若没有AI任务，等待真人，不解释任务为何为空。未发生游戏操作、用户主动询问时，直接简短回答其问题或提示“请N号发言”“请投票”，不得冒称重新开局。任何情况下都不输出工具名、JSON、变量、aiBatch、null、思考分析、准备查询或自我纠正过程，不添加寒暄、鼓励、规则复述、复盘或再次开局邀请。播报票数、出局和胜负必须依据真实工具结果。以上网页模式优先于后文单机模式。`
+const hostInstructions = `你是网页多人游戏“谁是卧底”的语音主持，理解玩家语音并扮演空位AI。Go的game.*工具是真实房间唯一状态来源，不得自行发词、改票或虚构操作成功。连接时的game_context已给出当前房间快照，座位、姓名、真人或AI身份只以该快照players为准，禁止套用单机模式的固定姓名。只说普通话中文，不输出英文思考。仅在状态不明确、工具冲突或玩家询问现状时调用game.get_state；其中currentUtterance是本次识别原文，不能遗漏。玩家明确说开始时调用game.start；轮到真人描述时，描述本身就是提交意图，调用game.submit_description即可，Go采用本次识别原文，不需要确认；说投几号调用game.vote；明确跳过调用game.skip。真人语音会话不提供AI任务工具；轮到真人描述就提交其识别原文，绝不能查询AI任务后遗漏真人发言。一次会话只提交一次游戏动作，成功后结束，不再处理后续玩家。Go会立即把本次已提交发言与下一步提示按顺序交给灵矽TTS播报，包含真人自己的发言；不要再生成总结、重述或额外主播播报。后续AI由后台自动继续，不能等待多位AI都提交完才播报。自动AI回合调用game.get_ai_batch读取任务：描述阶段只有一位AI，生成其12至30字描述，调用game.submit_ai_batch提交一次；投票阶段可按任务组完整提交多位AI的投票。提交后结束当前会话，不继续读取下一组任务。不要替真人操作。AI只利用自己的yourWord与公开描述推理，禁止利用其他AI的词或隐藏身份；投票只能选择legalTargets。所有yourWord都是秘密，真人的词只在网页私密区域显示，任何回复都不能念出。若没有AI任务，等待真人，不解释任务为何为空。用户询问状态时查询game.get_state，询问规则时查询game.get_rules。没有执行游戏动作时，由Go按实际房间状态返回中文提示或规则；不要自由生成报幕、改动座位或说玩家跳过。任何情况下都不输出工具名、JSON、变量、aiBatch、null、思考分析、准备查询或自我纠正过程，不添加寒暄、鼓励、规则复述、复盘或再次开局邀请。播报票数、出局和胜负必须依据真实工具结果。以上网页模式优先于后文单机模式。`
+
+const gameRules = "4人局3平民1卧底，6人局5平民1卧底；词卡只给本人。按座位依次描述，不能直接说出自己的词。所有存活者投票，不能投自己，可弃权。平票者补充描述后加投，再平票则无人出局并开始下一轮。卧底出局平民胜；卧底存活到只剩2人则卧底胜。"
 
 func gameTools() []linx.Tool {
 	schema := func(properties map[string]any, required ...string) map[string]any {
@@ -60,6 +63,7 @@ func (a *App) publicAgentState(id, uid string) (any, error) {
 		return nil, err
 	}
 	v.MyWord = ""
+	v.MyDraft = ""
 	for i := range v.Players {
 		v.Players[i].Avatar = ""
 	}
@@ -94,7 +98,7 @@ func (a *App) gameToolHandler(id, uid string, recording func() []byte, utterance
 			}
 			return map[string]any{"room": state, "currentUtterance": input}, nil
 		case "game.get_rules":
-			return "4人局3平民1卧底，6人局5平民1卧底；词卡只给本人。按座位依次描述，不能直接说出自己的词。所有存活者投票，不能投自己，可弃权。平票者补充描述后加投，再平票则无人出局并开始下一轮。卧底出局平民胜；卧底存活到只剩2人则卧底胜。", nil
+			return gameRules, nil
 		case "game.start":
 			_, err = a.rooms.Start(id, uid)
 			if err == nil {
@@ -143,9 +147,24 @@ func (a *App) gameToolHandler(id, uid string, recording func() []byte, utterance
 			}
 			_, err = a.rooms.Vote(id, uid, target)
 		case "game.skip":
+			if utterance != nil && !explicitSkip(utterance()) {
+				return nil, errors.New("玩家没有明确要求跳过，不能把已识别的发言当作跳过")
+			}
 			_, err = a.rooms.Skip(id, uid)
 		case "game.get_ai_batch":
-			return a.rooms.NextAIBatch(id, uid)
+			batch, e := a.rooms.NextAIBatch(id, uid)
+			if e != nil {
+				return nil, e
+			}
+			state, e := a.publicAgentState(id, uid)
+			if e != nil {
+				return nil, e
+			}
+			input := ""
+			if utterance != nil {
+				input = utterance()
+			}
+			return map[string]any{"room": state, "aiBatch": batch, "currentUtterance": input}, nil
 		case "game.submit_ai_batch":
 			err = a.rooms.SubmitAIBatch(id, uid, args.BatchID, args.Actions)
 		default:
@@ -160,4 +179,29 @@ func (a *App) gameToolHandler(id, uid string, recording func() []byte, utterance
 		}
 		return map[string]any{"room": state, "nextAction": "本次动作已提交，Go将依序播报；结束当前会话，后续AI由后台自动继续。"}, nil
 	}
+}
+
+func explicitSkip(text string) bool {
+	switch compactInput(text) {
+	case "跳过", "我跳过", "跳过发言", "这轮跳过", "这轮我跳过", "我不想发言", "我不想说", "过", "pass":
+		return true
+	}
+	return false
+}
+func compactInput(text string) string {
+	return strings.ToLower(strings.Map(func(r rune) rune {
+		if unicode.IsPunct(r) || unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, text))
+}
+func readOnlyQuestion(text string) bool {
+	normalized := compactInput(text)
+	for _, question := range []string{"轮到谁", "该谁发言", "谁发言", "现在什么情况", "现在什么状态", "我已经说了", "我已经发言", "我说过了", "当前状态", "游戏规则", "怎么玩", "怎么投票", "怎么发言", "怎么开始", "还有谁活着", "谁还活着", "我的词是什么", "我的词是啥", "再说一遍规则"} {
+		if strings.Contains(normalized, question) {
+			return true
+		}
+	}
+	return false
 }

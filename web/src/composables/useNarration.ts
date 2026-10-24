@@ -5,12 +5,6 @@ import type { AudioCue, GameLog } from '../types'
 type Item = { room: string; log: GameLog; linx: boolean; blob?: Blob }
 type State = 'idle' | 'loading' | 'playing' | 'blocked' | 'error'
 
-// Committed events share one queue, including the speaker's own description.
-// Only a free-form reply already streaming on this browser is excluded.
-export function narrationEntries(logs: GameLog[], ownReplyStreaming: boolean) {
-  return logs.filter(log => log.source !== 'linx_agent' || !ownReplyStreaming)
-}
-
 export function spokenText(log: GameLog) {
   return log.kind === 'speech' && !log.audio
     ? `${log.seat}号：${log.text}`

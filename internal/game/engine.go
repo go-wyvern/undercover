@@ -169,11 +169,13 @@ func (g *Game) Speak(id, text string, audio bool) error {
 	g.advanceSpeaker()
 	return nil
 }
-func (g *Game) Skip(id string) error {
+func (g *Game) Skip(id string) error        { return g.skip(id, "跳过。") }
+func (g *Game) SkipTimeout(id string) error { return g.skip(id, "超时跳过。") }
+func (g *Game) skip(id, reason string) error {
 	if g.CurrentID() != id {
 		return errors.New("还没轮到你发言")
 	}
-	g.addLog("host", nil, fmt.Sprintf("%d号跳过。", g.Player(id).Seat))
+	g.addLog("host", nil, fmt.Sprintf("%d号%s", g.Player(id).Seat, reason))
 	g.advanceSpeaker()
 	return nil
 }

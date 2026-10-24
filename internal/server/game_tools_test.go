@@ -137,3 +137,29 @@ func TestVoiceDescriptionUsesRecognizedOriginalAndKeepsItInThisSession(t *testin
 		t.Fatal("recognized speech was not saved")
 	}
 }
+
+func TestVoiceSkipRequiresAnExplicitRequest(t *testing.T) {
+	a, err := newTestApp(Config{Auth: auth.Config{AllowGuest: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	_, _ = a.rooms.Join("room-1", "host", "房主", "")
+	input := "开始游戏"
+	handler := a.gameToolHandler("room-1", "host", func() []byte { return nil }, func() string { return input })
+	if _, err = handler(context.Background(), "game.start", json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	input = "这是在水面下面进行的活动。"
+	if _, err = handler(context.Background(), "game.skip", json.RawMessage(`{}`)); err == nil {
+		t.Fatal("model skipped a real description without authorization")
+	}
+	state, _ := a.rooms.View("room-1", "host")
+	if state.CurrentPlayerID != state.MyPlayerID {
+		t.Fatal("unauthorized skip moved the turn")
+	}
+	input = "跳过"
+	if _, err = handler(context.Background(), "game.skip", json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+}

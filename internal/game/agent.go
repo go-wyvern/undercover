@@ -11,11 +11,23 @@ import (
 
 // A voice conversation owns AI turns and pauses their deadline until the reply finishes.
 func (m *Manager) AcquireAgent(id, uid string) (func(), error) {
+	return m.acquireAgent(id, uid, false)
+}
+
+// AcquireHumanAgent validates the actor and takes the room in the same lock.
+// Automatic AI continuations continue to use AcquireAgent.
+func (m *Manager) AcquireHumanAgent(id, uid string) (func(), error) {
+	return m.acquireAgent(id, uid, true)
+}
+func (m *Manager) acquireAgent(id, uid string, human bool) (func(), error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r := m.rooms[id]
 	if r == nil || member(r, uid) == nil {
 		return nil, errors.New("请先加入房间")
+	}
+	if human && !VoiceTurnAllowed(view(r, uid)) {
+		return nil, errors.New("请等待自己的发言或投票回合，开局和再来一局仅房主可用")
 	}
 	if m.agentRooms[id] {
 		return nil, errors.New("主持正在回应另一位玩家，请稍后再说")
@@ -274,4 +286,29 @@ func (m *Manager) PendingAgentTurns() []AgentTurn {
 		}
 	}
 	return turns
+}
+
+// VoiceTurnAllowed mirrors the turn controls shown by the client. It deliberately
+// does not guess client playback progress; room ownership is checked atomically.
+func VoiceTurnAllowed(view View) bool {
+	var player *PublicPlayer
+	for i := range view.Players {
+		if view.Players[i].ID == view.MyPlayerID {
+			player = &view.Players[i]
+			break
+		}
+	}
+	if player == nil || player.Bot {
+		return false
+	}
+	if view.Phase == "waiting" || view.Phase == "finished" {
+		return view.IsHost
+	}
+	if !player.Alive {
+		return false
+	}
+	if view.Phase == "speaking" || view.Phase == "tiebreak" {
+		return view.CurrentPlayerID == player.ID
+	}
+	return view.Phase == "voting" && !player.HasVoted
 }

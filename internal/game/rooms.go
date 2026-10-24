@@ -17,18 +17,29 @@ import (
 )
 
 type Room struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Theme       string   `json:"theme"`
-	Capacity    int      `json:"capacity"`
-	OwnerID     string   `json:"ownerId"`
-	Players     []Player `json:"players"`
-	Game        *Game    `json:"game,omitempty"`
-	Version     int      `json:"version"`
-	CreatedAt   int64    `json:"createdAt"`
-	Logs        []Log    `json:"logs,omitempty"`
-	AgentActive bool     `json:"-"`
-	Seeded      bool     `json:"seeded,omitempty"`
+	ID            string         `json:"id"`
+	Name          string         `json:"name"`
+	Theme         string         `json:"theme"`
+	Capacity      int            `json:"capacity"`
+	OwnerID       string         `json:"ownerId"`
+	Players       []Player       `json:"players"`
+	Game          *Game          `json:"game,omitempty"`
+	Version       int            `json:"version"`
+	CreatedAt     int64          `json:"createdAt"`
+	Logs          []Log          `json:"logs,omitempty"`
+	AgentActive   bool           `json:"-"`
+	Seeded        bool           `json:"seeded,omitempty"`
+	PendingSpeech *PendingSpeech `json:"pendingSpeech,omitempty"`
+}
+
+// PendingSpeech is private input, bound to one human and one turn. Only that
+// member's view may expose it, until an explicit submission commits it.
+type PendingSpeech struct {
+	PlayerID string `json:"playerId"`
+	GameID   string `json:"gameId"`
+	Round    int    `json:"round"`
+	Phase    string `json:"phase"`
+	Text     string `json:"text"`
 }
 type PublicPlayer struct {
 	ID       string `json:"id"`
@@ -56,6 +67,7 @@ type View struct {
 	IsHost          bool     `json:"isHost"`
 	MyPlayerID      string   `json:"myPlayerId"`
 	MyWord          string   `json:"myWord,omitempty"`
+	MyDraft         string   `json:"myDraft,omitempty"`
 	Round           int      `json:"round"`
 	CurrentPlayerID string   `json:"currentPlayerId"`
 	CandidateIDs    []string `json:"candidateIds"`
@@ -300,6 +312,12 @@ func view(r *Room, uid string) View {
 		v.Reveals = append(v.Reveals, g.Reveals()...)
 		v.LastVotes = append(v.LastVotes, g.LastVotes...)
 		v.Deadline = g.Deadline
+		if pendingSpeechMatches(r) {
+			v.Deadline = 0
+			if r.PendingSpeech.PlayerID == p.ID {
+				v.MyDraft = r.PendingSpeech.Text
+			}
+		}
 		for i := range v.Players {
 			_, v.Players[i].HasVoted = g.Votes[v.Players[i].ID]
 		}
@@ -491,9 +509,13 @@ func (m *Manager) Speak(id, uid, text string, pcm []byte) (View, error) {
 	}
 	p := member(r, uid)
 	b := backup(r)
+	if len(pcm) == 0 && pendingSpeechMatches(r) && r.PendingSpeech.PlayerID == p.ID && r.PendingSpeech.Text == strings.TrimSpace(text) {
+		pcm = append([]byte(nil), m.audio[id+"/draft"]...)
+	}
 	if err := r.Game.Speak(p.ID, text, len(pcm) > 0); err != nil {
 		return View{}, err
 	}
+	r.PendingSpeech = nil
 	logID := ""
 	for i := len(r.Game.Logs) - 1; i >= 0; i-- {
 		if r.Game.Logs[i].Kind == "speech" {
@@ -504,11 +526,72 @@ func (m *Manager) Speak(id, uid, text string, pcm []byte) (View, error) {
 	if err := m.commitLocked(r, b); err != nil {
 		return View{}, err
 	}
+	delete(m.audio, id+"/draft")
 	if len(pcm) > 0 {
 		m.audio[id+"/"+logID] = append([]byte(nil), pcm...)
 	}
 	return view(r, uid), nil
 }
+func pendingSpeechMatches(r *Room) bool {
+	p, g := r.PendingSpeech, r.Game
+	return p != nil && g != nil && p.GameID == g.ID && p.Round == g.Round && p.Phase == g.Phase && p.PlayerID == g.CurrentID()
+}
+
+// RememberSpeech never advances a turn or exposes input to another player.
+func (m *Manager) RememberSpeech(id, uid, text string, pcm []byte) error {
+	text = strings.TrimSpace(text)
+	if text == "" || utf8.RuneCountInString(text) > 240 || len(pcm) > 960000 || len(pcm)%2 != 0 {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	room := m.rooms[id]
+	if room == nil {
+		return ErrRoomNotFound
+	}
+	player := member(room, uid)
+	game := room.Game
+	if player == nil || game == nil || (game.Phase != "speaking" && game.Phase != "tiebreak") || game.CurrentID() != player.ID {
+		return nil
+	}
+	before := backup(room)
+	room.PendingSpeech = &PendingSpeech{PlayerID: player.ID, GameID: game.ID, Round: game.Round, Phase: game.Phase, Text: text}
+	if err := m.commitLocked(room, before); err != nil {
+		return err
+	}
+	m.audio[id+"/draft"] = append([]byte(nil), pcm...)
+	return nil
+}
+
+func (m *Manager) StatusText(id, uid string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	room := m.rooms[id]
+	if room == nil || member(room, uid) == nil {
+		return "", errors.New("请先加入房间")
+	}
+	g := room.Game
+	if g == nil {
+		return "等待房主开始游戏。", nil
+	}
+	if g.Phase == "finished" {
+		if g.Winner == "civilian" {
+			return "平民获胜。", nil
+		}
+		return "卧底获胜。", nil
+	}
+	if g.Phase == "dealing" {
+		return "正在发牌。", nil
+	}
+	if g.Phase == "voting" {
+		return "请投票。", nil
+	}
+	if player := g.Player(g.CurrentID()); player != nil {
+		return fmt.Sprintf("请%d号发言。", player.Seat), nil
+	}
+	return "请稍候。", nil
+}
+
 func (m *Manager) Vote(id, uid, target string) (View, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -536,6 +619,7 @@ func (m *Manager) Skip(id, uid string) (View, error) {
 	if err := r.Game.Skip(member(r, uid).ID); err != nil {
 		return View{}, err
 	}
+	r.PendingSpeech = nil
 	if err := m.commitLocked(r, b); err != nil {
 		return View{}, err
 	}
@@ -592,8 +676,8 @@ func (m *Manager) tick() {
 			g.Begin()
 			changed = true
 		}
-		if (g.Phase == "speaking" || g.Phase == "tiebreak") && time.Now().UnixMilli() >= g.Deadline {
-			_ = g.Skip(g.CurrentID())
+		if (g.Phase == "speaking" || g.Phase == "tiebreak") && !pendingSpeechMatches(r) && time.Now().UnixMilli() >= g.Deadline {
+			_ = g.SkipTimeout(g.CurrentID())
 			changed = true
 		}
 		if g.Phase == "voting" && time.Now().UnixMilli() >= g.Deadline {

@@ -40,7 +40,8 @@ import AccountAvatar from './components/AccountAvatar.vue'
 import RoomArt from './components/RoomArt.vue'
 import { api, ApiError } from './api'
 import { usePushToTalk } from './composables/usePushToTalk'
-import { narrationEntries, useNarration } from './composables/useNarration'
+import { useNarration } from './composables/useNarration'
+import { canStartVoice, voiceTurnAllowed } from './composables/voiceTurn'
 import { seatPosition as relativeSeatPosition, tableCardPosition as relativeCardPosition } from './composables/tableLayout'
 import type { AccountInfo, AudioCue, Config, GameLog, Player, RoomSummary, RoomView, User } from './types'
 
@@ -252,9 +253,32 @@ const turnProgress = computed(() => {
   if (r.phase === 'voting') return 80
   return 25 + ((speaker.value?.seat || 1) / r.capacity) * 40
 })
-const canRecord = computed(
-  () => config.value.voiceConfigured && !busy.value && (!room.value?.agentActive || voice.recording.value || voice.recognizing.value || voice.connecting.value),
-)
+const playbackPending = computed(() => narration.enabled.value &&
+  (narration.queuedCount.value > 0 || narration.state.value === 'loading' || narration.state.value === 'playing'))
+const canRecord = computed(() => {
+  if (!config.value.voiceConfigured || busy.value) return false
+  // Keep a held button enabled so pointer-up still flushes this recording.
+  if (voice.recording.value || voice.connecting.value || voice.recognizing.value) return true
+  return canStartVoice(room.value, playbackPending.value)
+})
+const voiceWaitText = computed(() => {
+  if (playbackPending.value) {
+    const seat = audibleCue.value?.seat || narration.current.value?.seat
+    return seat ? `正在播放${seat}号发言` : '请先收听主持播报'
+  }
+  const value = room.value
+  if (!value) return '请先入座'
+  if (value.agentActive) return '主持正在处理，请稍候'
+  if (value.phase === 'dealing') return '正在发牌'
+  if (!voiceTurnAllowed(value)) {
+    if (value.phase === 'waiting') return '等待房主开始'
+    if (value.phase === 'finished') return '等待房主再开一局'
+    if (!me.value?.alive) return '正在观战'
+    if (value.phase === 'voting') return '已投票，等待其他玩家'
+    return speaker.value ? `等待${speaker.value.seat}号发言` : '等待自己的回合'
+  }
+  return ''
+})
 const pttText = computed(() =>
   voice.recording.value
     ? `松开结束 · ${voice.seconds.value}s`
@@ -263,7 +287,7 @@ const pttText = computed(() =>
       : voice.connecting.value
         ? '正在开启麦克风'
         : config.value.voiceConfigured
-          ? '按住和灵矽说话'
+          ? voiceWaitText.value || '按住和灵矽说话'
           : me.value?.alive === false
             ? '正在观战'
             : '听听大家怎么说',
@@ -289,12 +313,13 @@ const dealerCaption = computed(() => {
 const voiceHint = computed(() => {
   if (voice.recording.value) return voice.connecting.value ? '正在录音并连接灵矽，松开后自动发送' : '正在录音，最长 30 秒'
   if (!config.value.voiceConfigured) return '语音尚未开启，可使用体验模式和文字操作'
+  if (voiceWaitText.value) return `${voiceWaitText.value}，轮到你后即可按住说话`
   if (room.value?.phase === 'waiting')
-    return room.value.isHost ? '按住说：开始游戏' : '开局请等房主，你也可以先询问玩法'
+    return '按住说：开始游戏'
   if (room.value?.phase === 'finished')
-    return room.value.isHost ? '按住说：再来一局' : '可说：回顾本局；再次开局请等房主'
+    return '按住说：再来一局'
   if (room.value?.phase === 'dealing') return '词卡正在分发，请稍候'
-  return myTurn.value || canVote.value ? '松开后由灵矽理解并执行' : '可说：轮到谁了、继续主持'
+  return '松开后由灵矽理解并执行'
 })
 
 function seatPosition(number: number) {
@@ -349,12 +374,13 @@ function updateRoom(value: RoomView, initial = false) {
     if (!voice.assistant.value) voice.cancel()
   }
   room.value = value
+  if (value.myDraft && (!draft.value || value.myDraft !== previous?.myDraft)) draft.value = value.myDraft
   if (!initial) {
     const added = value.logs.filter((log) => !knownLogs.has(log.id))
     for (const log of added) knownLogs.add(log.id)
     narration.enqueue(
       value.id,
-      narrationEntries(added, voice.assistant.value && voice.recognizing.value),
+      added,
       config.value.voiceConfigured,
     )
   }
@@ -485,7 +511,7 @@ async function createRoom() {
 }
 async function action(path: string, body: unknown = {}) {
   if (!room.value || busy.value) return
-  if (path === 'start') prepareNarration()
+  if (path === 'start' || path === 'speech') prepareNarration()
   busy.value = true
   try {
     updateRoom(await api<RoomView>(`/api/rooms/${encodeURIComponent(room.value.id)}/${path}`, body))
@@ -885,7 +911,7 @@ onUnmounted(() => {
                       processing: voice.connecting.value || voice.recognizing.value,
                       available: canRecord,
                     }"
-                    :disabled="!canRecord || voice.recognizing.value"
+                    :disabled="!canRecord || (voice.recognizing.value && !voice.recording.value)"
                     aria-label="按住说话"
                     @pointerdown="startRecording"
                     @pointerup="voice.stop"
@@ -1077,21 +1103,22 @@ onUnmounted(() => {
               </div>
               <div v-if="myTurn" class="composer">
                 <label class="composer-label" for="speech-draft"
-                  >轮到你发言了 <span>一句话，也有大学问。</span></label
+                  >{{ room.myDraft && !room.agentActive ? '已识别，待提交' : '轮到你发言了' }} <span>{{ room.myDraft && !room.agentActive ? '原文已保留，确认后继续。' : '一句话，也有大学问。' }}</span></label
                 ><textarea
                   id="speech-draft"
                   v-model="draft"
+                  :disabled="room.agentActive"
                   maxlength="160"
                   placeholder="也可以在这里输入你的描述…"
                   @keydown.ctrl.enter.prevent="sendSpeech"
                   @keydown.meta.enter.prevent="sendSpeech"
                 ></textarea>
                 <div class="composer-footer">
-                  <button class="text-button skip-button" :disabled="busy" @click="action('skip')">
+                  <button class="text-button skip-button" :disabled="busy || room.agentActive" @click="action('skip')">
                     跳过本轮</button
                   ><button
                     class="send-button"
-                    :disabled="!draft.trim() || busy || voice.recording.value"
+                    :disabled="!draft.trim() || busy || voice.recording.value || room.agentActive"
                     @click="sendSpeech"
                   >
                     确认发言<Send :size="14" />

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,8 +24,13 @@ import (
 // supplies an upstream address, a user ID, device credentials or arbitrary tools.
 func (a *App) assistantVoice(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	id := r.PathValue("id")
-	if _, err := a.rooms.View(id, u.ID); err != nil {
+	view, err := a.rooms.View(id, u.ID)
+	if err != nil {
 		fail(w, 403, err)
+		return
+	}
+	if !game.VoiceTurnAllowed(view) {
+		fail(w, 409, errors.New("请等待自己的发言或投票回合，开局和再来一局仅房主可用"))
 		return
 	}
 	if !a.voice.Configured() {
@@ -42,7 +46,7 @@ func (a *App) assistantVoice(w http.ResponseWriter, r *http.Request, u *auth.Use
 	front.SetReadLimit(4096)
 	ctx, cancel := a.roomContext(r.Context(), id, 100*time.Second)
 	defer cancel()
-	release, err := a.rooms.AcquireAgent(id, u.ID)
+	release, err := a.rooms.AcquireHumanAgent(id, u.ID)
 	if err != nil {
 		_ = front.WriteJSON(map[string]string{"type": "error", "message": err.Error()})
 		return
@@ -138,8 +142,27 @@ func (a *App) openGameAgent(ctx context.Context, id, uid string, recording func(
 	var inputMu sync.Mutex
 	var input string
 	getInput := func() string { inputMu.Lock(); defer inputMu.Unlock(); return input }
-	onTranscript := func(text string) { inputMu.Lock(); input = strings.TrimSpace(text); inputMu.Unlock() }
+	humanVoice := recording != nil
+	onTranscript := func(text string) {
+		inputMu.Lock()
+		input = strings.TrimSpace(text)
+		inputMu.Unlock()
+		if humanVoice && !readOnlyQuestion(text) && !explicitSkip(text) {
+			if err := a.rooms.RememberSpeech(id, uid, text, recording()); err != nil {
+				slog.Warn("save recognized speech draft", "room", id, "error", err)
+			}
+		}
+	}
 	tools := gameTools()
+	if humanVoice {
+		var humanTools []linx.Tool
+		for _, tool := range tools {
+			if tool.Name != "game.get_ai_batch" && tool.Name != "game.submit_ai_batch" {
+				humanTools = append(humanTools, tool)
+			}
+		}
+		tools = humanTools
+	}
 	if recording == nil {
 		// A synthetic continuation is not a human utterance or authorization.
 		getInput = nil
@@ -154,9 +177,18 @@ func (a *App) openGameAgent(ctx context.Context, id, uid string, recording func(
 		}
 		tools = automatic
 	}
+	roster := []string{}
+	for _, player := range public.(game.View).Players {
+		kind := "真人"
+		if player.Bot {
+			kind = "AI玩家"
+		}
+		roster = append(roster, fmt.Sprintf("%d号：%s（%s）", player.Seat, player.Name, kind))
+	}
+	instructions := hostInstructions + "本桌真实座位：" + strings.Join(roster, "；") + "。不得使用本桌以外的人名。"
 	return a.voice.OpenWithTools(ctx, uid+"/assistant", linx.SessionOptions{
 		Tools: tools, Call: a.gameToolHandler(id, uid, recording, getInput),
-		Prompt:       map[string]string{"game_context": string(contextJSON), "game_instructions": hostInstructions},
+		Prompt:       map[string]string{"game_context": string(contextJSON), "game_instructions": instructions},
 		OnTranscript: onTranscript,
 	})
 }
@@ -172,139 +204,90 @@ func (a *App) receiveAssistant(ctx context.Context, id, uid string, upstream *li
 		return err
 	}
 	startedAt := time.Now()
-	var packets [][]byte
-	var response strings.Builder
-	size := 0
-	streamed := false
-	sentenceAllowed := false
-	cues := []game.AudioCue{}
-	durationMS := int64(0)
+	rulesRequested := false
 	for {
-		kind, b, e := upstream.Conn.ReadMessage()
-		if e != nil {
+		kind, data, err := upstream.Conn.ReadMessage()
+		if err != nil {
 			if ctx.Err() == nil {
-				slog.Warn("Linx assistant conversation ended", "error", e)
+				slog.Warn("Linx assistant conversation ended", "error", err)
 			}
-			_ = emit(map[string]string{"type": "error", "message": "灵矽对话未完成，已执行的游戏操作可在圆桌查看，请重试"})
+			_ = emit(map[string]string{"type": "error", "message": "灵矽对话未完成；已识别的发言会保留为草稿，可确认提交"})
 			return errors.New("assistant conversation interrupted")
 		}
-		if kind == websocket.BinaryMessage {
-			size += len(b)
-			if size > 8<<20 {
-				return errors.New("assistant conversation interrupted")
-			}
-			packets = append(packets, append([]byte(nil), b...))
-			if upstream.AudioFormat == "pcm" {
-				durationMS = int64(size) * 1000 / int64(upstream.SampleRate*2)
-			} else {
-				durationMS += linx.OpusPacketDurationMS(b)
-			}
-			if output != nil && upstream.AudioFormat == "pcm" && sentenceAllowed {
-				if output.WriteMessage(websocket.BinaryMessage, b) != nil {
-					return errors.New("assistant conversation interrupted")
-				}
-				streamed = true
-			}
+		// Free-form model speech is never forwarded, cached or published.
+		// Tool actions and read-only replies both use verified public text.
+		if kind != websocket.TextMessage {
 			continue
 		}
-		if handled, e := upstream.HandleMCP(ctx, b); handled {
-			if e != nil {
-				return errors.New("assistant conversation interrupted")
+		// Transcript preservation changes the version too; only compare the
+		// snapshot immediately surrounding this tool call.
+		before, err = a.rooms.View(id, uid)
+		if err != nil {
+			return err
+		}
+		if handled, err := upstream.HandleMCP(ctx, data); handled {
+			if err != nil {
+				return err
 			}
 			after, err := a.rooms.View(id, uid)
 			if err != nil {
 				return err
 			}
-			if after.Version != before.Version && gameActionCall(b) {
-				// Tool results are authoritative. Do not ask the model to paraphrase
-				// them or finish every remaining AI turn before anyone can hear it.
-				if streamed {
-					_ = emit(map[string]string{"type": "reset_audio"})
-				}
+			if after.Version != before.Version && gameActionCall(data) {
 				return a.narrateAction(ctx, id, uid, upstream, before, after, output)
+			}
+			var call struct {
+				Payload struct{ Params struct{ Name string } }
+			}
+			_ = json.Unmarshal(data, &call)
+			if call.Payload.Params.Name == "game.get_rules" {
+				rulesRequested = true
 			}
 			before = after
 			continue
 		}
-		var msg linx.Message
-		if json.Unmarshal(b, &msg) != nil {
+		var message linx.Message
+		if json.Unmarshal(data, &message) != nil {
 			continue
 		}
-		if msg.Type == "stt" && strings.TrimSpace(msg.Text) != "" {
-			upstream.NoteTranscript(msg.Text)
-			slog.Info("Linx speech recognized", "room", id, "characters", utf8.RuneCountInString(msg.Text), "elapsed_ms", time.Since(startedAt).Milliseconds())
-			_ = emit(map[string]string{"type": "transcript", "text": msg.Text})
+		if message.Type == "stt" && strings.TrimSpace(message.Text) != "" {
+			upstream.NoteTranscript(message.Text)
+			slog.Info("Linx speech recognized", "room", id, "characters", utf8.RuneCountInString(message.Text), "elapsed_ms", time.Since(startedAt).Milliseconds())
+			_ = emit(map[string]string{"type": "transcript", "text": message.Text})
 			continue
 		}
-		if msg.Type == "tts" && msg.State == "sentence_start" {
-			if response.Len() < 6000 {
-				response.WriteString(msg.Text)
+		if message.Type != "tts" || message.State != "stop" || message.IsAborted {
+			continue
+		}
+		text, err := a.rooms.StatusText(id, uid)
+		if err != nil {
+			return err
+		}
+		view, err := a.rooms.View(id, uid)
+		if err != nil {
+			return err
+		}
+		if view.MyDraft != "" {
+			for _, player := range view.Players {
+				if player.ID == view.MyPlayerID {
+					text = fmt.Sprintf("请%d号确认提交发言。", player.Seat)
+				}
 			}
-			safe, e := a.rooms.SafeHostText(id, uid, msg.Text)
-			sentenceAllowed = e == nil && safe == msg.Text
-			if sentenceAllowed {
-				cue := a.sentenceCue(id, uid, msg.Text, durationMS)
-				cues = append(cues, cue)
-				_ = emit(map[string]string{"type": "assistant_sentence", "text": cue.Text, "logId": cue.LogID, "playerId": cue.PlayerID, "seat": strconv.Itoa(cue.Seat), "offsetMs": strconv.FormatInt(cue.OffsetMS, 10)})
-			}
-			continue
 		}
-		if msg.Type == "tts" && msg.State == "stop" && msg.IsAborted {
-			packets = nil
-			size = 0
-			response.Reset()
-			cues = nil
-			durationMS = 0
-			sentenceAllowed = false
-			if streamed {
-				_ = emit(map[string]string{"type": "reset_audio"})
-				streamed = false
-			}
-			continue
+		if rulesRequested {
+			text = gameRules
 		}
-		if msg.Type != "tts" || msg.State != "stop" {
-			continue
+		log := game.Log{ID: game.ID(), Kind: "host", Text: text, Source: "linx_agent"}
+		audio, synthesisErr := upstream.SynthesizeText(ctx, text)
+		if synthesisErr == nil {
+			a.cacheAudio(id+"/"+log.ID, audio)
+		} else {
+			slog.Warn("Linx state narration failed", "room", id, "error", synthesisErr)
 		}
-		if len(packets) == 0 && response.Len() == 0 {
-			continue
+		if err := a.rooms.AppendHostLog(id, uid, log); err != nil {
+			return err
 		}
-		text := strings.TrimSpace(response.String())
-		if text == "" {
-			text = "灵矽主持已回复，请收听语音。"
-		}
-		safe, e := a.rooms.SafeHostText(id, uid, text)
-		if e != nil {
-			return errors.New("assistant conversation interrupted")
-		}
-		upstream.Close()
-		var audio []byte
-		if safe != text {
-			_ = emit(map[string]string{"type": "reset_audio"})
-			streamed = false
-			cues = nil
-			audio, e = a.voice.Synthesize(ctx, "safe-host-reply", safe)
-			if e != nil {
-				audio = nil
-			}
-			text = safe
-		} else if upstream.AudioFormat == "pcm" {
-			audio = linx.PCMToWAVAtRate(bytes.Join(packets, nil), upstream.SampleRate)
-		} else if upstream.AudioFormat == "opus" {
-			audio = linx.OpusOgg(packets, upstream.SampleRate)
-		}
-		l := game.Log{ID: game.ID(), Kind: "host", Text: text, Source: "linx_agent", AudioCues: cues}
-		if len(audio) > 0 {
-			a.cacheAudio(id+"/"+l.ID, audio)
-		}
-		if streamed {
-			_ = emit(map[string]string{"type": "assistant_reply_id", "id": l.ID})
-		}
-		if e = a.rooms.AppendHostLog(id, uid, l); e != nil {
-			_ = emit(map[string]string{"type": "error", "message": "主持回复保存失败，请重试"})
-			return errors.New("assistant conversation interrupted")
-		}
-		_ = emit(map[string]string{"type": "assistant_done", "text": text, "id": l.ID, "streamed": strconv.FormatBool(streamed)})
-		return nil
+		return emit(map[string]string{"type": "assistant_done", "id": log.ID, "text": text, "streamed": "false"})
 	}
 }
 

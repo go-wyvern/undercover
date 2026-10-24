@@ -52,11 +52,14 @@ data: {"message":"房主已关闭房间"}
 
 ## 完整智能体会话
 
-`/assistant/voice` 允许房间成员在等待、描述、投票或结束阶段与主持交谈。客户端等待 `ready` 后发送 PCM，松开后发 `stop`。收到 `transcript` 仅展示用户原话并保持连接；收到 `assistant_done` 才结束。成功动作通过 SSE 推送原发言与固定提示，所有成员（包括发言本人）立即按记录入队，播放原声或该记录的灵矽合成音频。`agentActive` 不会暂停或清空此队列。若本条 TTS 未就绪，音频接口等待当前会话的缓存；动作完成后返回 `assistant_done`，`streamed` 为 `"false"`，可不含 `id` 和 `text`。未执行动作的普通询问仍可保存为 `source: "linx_agent"` 的主持记录并实时播放。
+`/assistant/voice` 仅允许当前存活发言玩家、尚未投票的存活玩家使用；等待与结束阶段仅房主可用来开局或再来一局。发牌阶段、已出局、已投票或未轮到本人的请求在 WebSocket 升级前返回 409，不占用灵矽设备和房间主持会话。客户端还会等待当前播报队列结束才启用录音按钮。客户端等待 `ready` 后发送 PCM，松开后发 `stop`。收到 `transcript` 仅展示用户原话并保持连接；收到 `assistant_done` 才结束。成功动作通过 SSE 推送原发言与固定提示，所有成员（包括发言本人）立即按记录入队，播放原声或该记录的灵矽合成音频。`agentActive` 不会暂停或清空此队列。若本条 TTS 未就绪，音频接口等待当前会话的缓存；动作完成后返回 `assistant_done`，`streamed` 为 `"false"`，可不含 `id` 和 `text`。未执行动作的查询由Go生成真实状态提示或规则，并保存为 `source: "linx_agent"` 的记录，通过同一队列播报；不转发模型自由回复。
 
 端侧 MCP 通过同一条服务端灵矽 WebSocket 自动注册。公开状态中不包含真人词卡，AI 任务的秘密词只交给灵矽模型。任务组 ID 用于阻止过期 AI 操作，所有工具都使用当前会话账号和房间。
 
-普通询问使用实时 PCM 时，`ready` 包含 `audioFormat` 与 `sampleRate`（字符串）。客户端保留录音时已解锁的 AudioContext；`assistant_sentence` 提供 `text`、`offsetMs`、`logId`、`playerId`、`seat`（数值字段为字符串）。后续二进制消息为该采样率的单声道 PCM16LE，排队播放后，字幕与头像应在排定的 AudioContext 播放时间触发，不能收到消息就提前显示。`assistant_reply_id` 标记已听过的公开记录；`assistant_done` 带 `id` 与 `streamed`，应等本机已排队音频播放完后再关闭音频上下文。`reset_audio` 要立即清空排队声音。未实时播放的请求与其他成员通过 SSE 记录读取完整 WAV/OGG 音频。
+旧版本实时 PCM 协议中，`ready` 包含 `audioFormat` 与 `sampleRate`（字符串）。客户端保留录音时已解锁的 AudioContext；`assistant_sentence` 提供 `text`、`offsetMs`、`logId`、`playerId`、`seat`（数值字段为字符串）。后续二进制消息为该采样率的单声道 PCM16LE，排队播放后，字幕与头像应在排定的 AudioContext 播放时间触发，不能收到消息就提前显示。`assistant_reply_id` 标记已听过的公开记录；`assistant_done` 带 `id` 与 `streamed`，应等本机已排队音频播放完后再关闭音频上下文。`reset_audio` 要立即清空排队声音。未实时播放的请求与其他成员通过 SSE 记录读取完整 WAV/OGG 音频。
 
 
 主持记录的 `audioCues` 为 `{offsetMs:number, text:string, logId?:string, playerId?:string, seat?:number}[]`。偏移相对于缓存的完整原声音频；整段播报按媒体 `currentTime` 切换气泡，新 AI 描述跟随对应音频首次播放才显示。普通按钮/文字动作后的待处理 AI 回合也自动调度同一个灵矽智能体。
+
+
+`RoomView.myDraft` 仅包含当前账号在当前发言回合识别后尚未提交的原文，其他账号、公开日志及灵矽公开房间上下文不包含该字段。存在待确认发言时 `deadline` 为 0，暂停自动超时跳过；使用现有 `POST /api/rooms/{id}/speech` 确认后提交一次、清除草稿并推进下一位。原文未修改且录音仍在内存时复用原声；修改文字或服务已重启时按确认文本合成。读取状态、查询规则与模型自由回复均不代表已提交描述。

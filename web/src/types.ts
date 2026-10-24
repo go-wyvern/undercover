@@ -56,6 +56,7 @@ export interface RoomView extends RoomSummary {
   version: number
   isHost: boolean
   myPlayerId: string
+  myDraft?: string
   myWord?: string
   round: number
   currentPlayerId: string
