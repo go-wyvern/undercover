@@ -1,0 +1,36 @@
+sequenceDiagram
+    autonumber
+    participant F as UnderCover 前端
+    participant S as UnderCover 服务端
+    participant L as 灵矽智能体
+    Note over F,L: 轮到1号，自己的播报队列已结束
+    F->>S: 新建浏览器 WSS，准备上传本次描述
+    S->>S: 校验当前轮到1号，取得主持占用权
+    S->>L: 新建上游 WSS，注入真实房间及真人工具
+    S-->>F: 浏览器 WSS：ready
+    F->>S: WSS：描述录音 PCM，松手发送 stop
+    S->>L: WSS：PCM、listen.stop
+    L-->>S: WSS stt：这是一个吃的东西
+    S->>S: 保留识别原文、录音和仅本人可见的待提交草稿
+    S-->>F: 浏览器 WSS：transcript
+    L->>S: WSS MCP：game.submit_description
+    S->>S: 使用识别原文，校验顺序与描述，保存公开记录
+    S->>S: 清除草稿，推进到2号，持久化 PostgreSQL
+    S-->>F: SSE：1号公开发言、新增“请2号发言”
+    S-->>L: WSS MCP：工具执行结果
+    par 下一位提示合成
+        S->>L: WSS text_response：请2号发言
+        L-->>S: WSS：提示音频
+        S->>S: 按提示记录ID缓存音频
+        S-->>F: 浏览器 WSS：assistant_done
+        S->>S: 结束本次会话并释放主持占用权
+    and 各成员收听，包含1号本人
+        F->>S: HTTPS GET audio/1号发言记录ID
+        S-->>F: HTTPS：本次原录音封装的 WAV
+        F->>F: 播放1号原声
+        F->>S: HTTPS GET audio/下一位提示记录ID
+        Note over F,S: 提示尚未合成完成时，HTTP 请求等待缓存
+        S-->>F: HTTPS：请2号发言的音频
+        F->>F: 继续播放提示，标明等待2号
+    end
+    Note over F,S: 1号按钮因回合变化禁用；2号在本机播报结束后可发言

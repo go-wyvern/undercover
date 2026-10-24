@@ -1,0 +1,44 @@
+sequenceDiagram
+    autonumber
+    participant F as UnderCover 前端
+    participant S as UnderCover 服务端
+    participant L as 灵矽智能体
+    Note over F,L: 2号新一在自己的浏览器复用第4节的真人描述流程
+    F->>S: 2号浏览器 WSS：本次语音
+    S->>L: 上游 WSS：2号录音与当前上下文
+    L->>S: WSS MCP：game.submit_description
+    S->>S: 保存2号描述与原声，当前玩家变为3号 AI
+    S-->>F: 各成员 SSE：2号发言、请3号发言
+    S-->>L: WSS MCP：工具执行结果
+    S->>L: WSS text_response：合成下一位提示
+    L-->>S: WSS：提示音频，服务端缓存
+    S-->>F: 2号浏览器 WSS：assistant_done
+    S->>S: 结束真人会话，后台每500ms检查 AI 任务
+    par 服务端逐位生成并提交 AI 描述
+        loop 3号、4号 AI 按座位逐位处理
+            S->>S: 取得房间主持占用权
+            opt 首次自动接续，尚无触发语音缓存
+                S->>L: 独立 WSS：合成“继续主持”的触发语音
+                L-->>S: WSS：返回触发语音
+                S->>S: 转为16kHz PCM并缓存，结束该合成连接
+            end
+            S->>L: 新建上游 WSS，注入上下文、AI工具并发送缓存 PCM
+            L->>S: WSS MCP：game.get_ai_batch
+            S-->>L: WSS MCP：当前一位 AI 的词、公开发言和任务ID
+            L->>S: WSS MCP：game.submit_ai_batch，一条描述
+            S->>S: 校验任务和座位，保存描述并推进回合
+            S-->>F: 各成员 SSE：本次 AI 描述、下一步提示
+            S-->>L: WSS MCP：工具执行结果
+            S->>L: WSS text_response：逐条指定公开描述和提示
+            L-->>S: WSS：TTS 音频
+            S->>S: 独立缓存，结束本次会话并释放占用权
+        end
+    and 各成员独立维护本机播放队列
+        loop 按 SSE 记录顺序逐条收听
+            F->>S: HTTPS GET audio/公开记录ID
+            Note over F,S: 若缓存未就绪，HTTP 请求等待
+            S-->>F: HTTPS：该条音频
+            F->>F: 顺序播放，跟随播放时钟显示 AI 气泡与描述
+        end
+    end
+    Note over F,S: 4号提交后进入 voting；服务端无需等待所有浏览器播完才继续

@@ -1,0 +1,42 @@
+sequenceDiagram
+    autonumber
+    participant F as UnderCover 前端
+    participant S as UnderCover 服务端
+    participant L as 灵矽智能体
+    Note over S,L: 本例在后台 AI 投票会话中，应用最后一票后立即计票
+    S->>S: 统计票数并确定最高票候选人
+    alt 卧底被投出局
+        S->>S: phase=finished，winner=civilian
+    else 平民出局，卧底存活且剩余不超过2人
+        S->>S: phase=finished，winner=undercover
+    else 平民出局，仍需继续
+        S->>S: round加一，phase=speaking，选择下轮首位存活玩家
+    else 首次平票
+        S->>S: phase=tiebreak，平票玩家补充描述后加投
+    else 再次平票或全部弃权
+        S->>S: 无人出局，进入下一轮 speaking
+    end
+    S->>S: 保存阶段、投票结果、日志及胜负到 PostgreSQL
+    S-->>F: SSE：新阶段、公开结果，结束时附 winner 和 reveals
+    F->>F: 更新圆桌；结束时翻开全部词卡并展示胜负
+    S-->>L: WSS MCP：当前投票工具的真实执行结果
+    par 结果语音生成
+        loop 按公开记录顺序处理票数、出局、胜负或下一位提示
+            S->>L: 当前 WSS：text_response 指定这一条记录
+            L-->>S: 当前 WSS：TTS 音频
+            S->>S: 按记录ID缓存
+        end
+        S->>S: 结束后台会话，释放主持占用权
+    and 各成员播放结果
+        F->>S: HTTPS GET /api/rooms/R/audio/结果记录ID
+        Note over F,S: 缓存尚未就绪时等待；记录按队列逐条获取
+        S-->>F: HTTPS：对应结果音频
+        F->>F: 顺序播放结果，SSE 继续保持连接
+    end
+    opt 本局结束后，房主要求再来一局
+        F->>S: 新建浏览器 WSS，上传“再来一局”录音
+        S->>L: 新建上游 WSS，提供当前状态并转发录音
+        L->>S: WSS MCP：game.start
+        S->>S: 校验房主，创建新 gameId，重新发牌
+        S-->>F: SSE：新一局状态，回到第3节的开局后续流程
+    end

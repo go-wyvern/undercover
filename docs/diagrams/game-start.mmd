@@ -1,0 +1,43 @@
+sequenceDiagram
+    autonumber
+    participant F as UnderCover 前端
+    participant S as UnderCover 服务端
+    participant L as 灵矽智能体
+    Note over F,S: 1号是房主，房间 SSE 已建立
+    F->>F: 按住说“开始游戏”，采集并暂存录音
+    F->>S: 建立 WSS /api/rooms/R/assistant/voice
+    S->>S: 校验登录和房主身份，取得房间主持占用权
+    opt 需要获取或刷新设备连接凭证
+        S->>L: HTTPS POST OTA
+        L-->>S: 设备 Token 和 WSS 地址
+    end
+    S->>L: 建立另一条 WSS，hello 注入上下文和主持约束
+    L->>S: WSS MCP：initialize、tools/list
+    S-->>L: WSS MCP：返回真人会话可用工具
+    S->>L: WSS listen.start
+    S-->>F: 浏览器 WSS：ready
+    F->>S: 浏览器 WSS：已录与后续 PCM，松手发送 stop
+    S->>L: 上游 WSS：转发 PCM、listen.stop
+    L-->>S: 上游 WSS stt：开始游戏
+    S-->>F: 浏览器 WSS transcript：开始游戏
+    L->>S: WSS MCP tools/call：game.start
+    S->>S: 校验、补齐 AI、随机发牌，保存 PostgreSQL
+    S-->>F: SSE：dealing、自己的词卡、开始游戏记录
+    S->>S: 发牌计时结束，进入 speaking，轮到1号
+    S-->>F: SSE：currentPlayerId 指向1号，新增“请1号发言”
+    S-->>L: WSS MCP：工具执行结果
+    par 主持音频生成
+        loop 开始游戏、请1号发言，逐条处理
+            S->>L: WSS listen.detect + text_response
+            L-->>S: 上游 WSS：TTS 音频
+            S->>S: 校验文本，按记录ID缓存音频
+        end
+        S-->>F: 浏览器 WSS：assistant_done
+        S->>S: 关闭本次语音连接，释放主持占用权
+    and 客户端播报队列
+        F->>S: HTTPS GET /api/rooms/R/audio/记录ID
+        Note over F,S: 请求早于音频就绪时，等待该条缓存
+        S-->>F: HTTPS：返回 WAV 或 OGG
+        F->>F: 顺序播放开场和1号提示，播完后启用本人按钮
+    end
+    Note over F,L: SSE 保持连接；assistant_done 不表示所有客户端都已播完

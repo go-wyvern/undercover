@@ -1,0 +1,12 @@
+flowchart LR
+    F["UnderCover 前端"]
+    S["UnderCover 服务端"]
+    L["灵矽智能体"]
+    P[(PostgreSQL)]
+    R[(Redis)]
+    F <-->|"HTTPS：页面、JSON API、音频"| S
+    F <-->|"WSS：录音、识别结果、会话控制"| S
+    S -->|"SSE：持续推送房间状态"| F
+    S <-->|"HTTPS OTA + WSS 音频与 MCP"| L
+    S <-->|"房间、词卡、对局记录"| P
+    S <-->|"登录会话"| R

@@ -1,0 +1,38 @@
+sequenceDiagram
+    autonumber
+    participant F as UnderCover 前端
+    participant S as UnderCover 服务端
+    participant L as 灵矽智能体
+    Note over F,S: SSE 已通知 voting，客户端顺序播放“请投票”
+    alt 你按住说“我投3号”
+        F->>S: 新建浏览器 WSS，上传投票录音
+        S->>S: 校验存活、未投票，取得主持占用权
+        S->>L: 上游 WSS：投票录音与真人工具
+        L-->>S: WSS stt：我投3号
+        S-->>F: 浏览器 WSS：transcript
+        L->>S: WSS MCP：game.vote，seat=3
+        S->>S: 校验阶段、投票人、目标，保存这一票
+        S-->>L: WSS MCP：工具执行结果
+        S-->>F: 浏览器 WSS：assistant_done
+        S->>S: 释放本次真人会话
+    else 你点击3号并确认
+        F->>S: HTTPS POST /api/rooms/R/vote，targetId=3号玩家ID
+        S->>S: 执行同一套投票校验，保存这一票
+        S-->>F: HTTPS 200：更新后的房间快照
+    end
+    S-->>F: SSE：已投票状态，hasVoted=true
+    Note over F,S: 新一也通过上述任一入口投票，真人之间不要求按座位顺序
+    alt 仍有存活真人未投票
+        S->>S: 等待真人，不生成 AI 投票任务
+    else 存活真人都已投票
+        S->>S: 后台取得房间主持占用权
+        S->>L: 新建后台 WSS，发送上下文和缓存的继续主持语音
+        L->>S: WSS MCP：game.get_ai_batch
+        S-->>L: WSS MCP：3号、4号 AI 的投票任务和合法目标
+        L->>S: WSS MCP：game.submit_ai_batch，整组 AI 投票
+        S->>S: 在副本上校验并应用整组投票
+        S->>S: 最后一票触发计票，决定下一轮、加赛或结束
+        S->>S: 原子保存 PostgreSQL，再推送 SSE
+        S-->>F: SSE：完整投票结果及新阶段
+        S-->>L: WSS MCP：工具执行结果，接第7节结果播报
+    end
