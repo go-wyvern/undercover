@@ -1,7 +1,10 @@
 name: CI
 
-# Like spxbench, publishing is manually triggered from the main branch.
+# Validate and publish when changes land on main, or when started manually.
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
