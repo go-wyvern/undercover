@@ -1,4 +1,4 @@
-name: Publish undercover image
+name: CI
 
 # Like spxbench, publishing is manually triggered from the main branch.
 on:
