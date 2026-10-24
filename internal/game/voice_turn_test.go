@@ -13,6 +13,7 @@ func TestHumanVoiceLeaseChecksCurrentTurnWithoutBlockingAutomaticAI(t *testing.T
 	if _, err := m.AcquireHumanAgent("room-1", "second"); err == nil {
 		t.Fatal("non-host could use the start microphone")
 	}
+	_, _ = m.SetReady("room-1", "second", true)
 	_, _ = m.Start("room-1", "host")
 	m.mu.Lock()
 	m.rooms["room-1"].Game.Begin()

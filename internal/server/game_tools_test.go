@@ -32,6 +32,7 @@ func TestGameToolsRespectActorAndDriveAIWithoutPublicSecrets(t *testing.T) {
 	if _, err = handler(context.Background(), "game.start", json.RawMessage(`{"roomId":"other-room"}`)); err == nil {
 		t.Fatal("tool accepted a client-selected room")
 	}
+	_, _ = a.rooms.SetReady("room-1", "other", true)
 	v, err := handler(context.Background(), "game.start", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)

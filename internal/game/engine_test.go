@@ -134,6 +134,7 @@ func TestHiddenStateViewsAndRoomPersistence(t *testing.T) {
 	if _, err = m.Start("room-1", "u2"); err == nil {
 		t.Fatal("non-host started game")
 	}
+	_, _ = m.SetReady("room-1", "u2", true)
 	own, err := m.Start("room-1", "u1")
 	if err != nil {
 		t.Fatal(err)

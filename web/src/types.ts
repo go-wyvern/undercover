@@ -19,6 +19,7 @@ export interface Player {
   bot: boolean
   alive: boolean
   hasVoted: boolean
+  ready: boolean
 }
 export interface AudioCue {
   offsetMs: number
@@ -42,6 +43,10 @@ export interface GameLog {
 }
 export type Phase = 'waiting' | 'dealing' | 'speaking' | 'tiebreak' | 'voting' | 'finished'
 export interface RoomSummary {
+  passwordRequired: boolean
+  autoFillAI: boolean
+  availableSeats: number
+  hostPlayerId: string
   id: string
   name: string
   theme: string
@@ -51,6 +56,9 @@ export interface RoomSummary {
   players: Player[]
 }
 export interface RoomView extends RoomSummary {
+  lobbyPlayers?: Player[]
+  canStart: boolean
+  startBlockReason?: string
   agentActive: boolean
   gameId: string
   version: number

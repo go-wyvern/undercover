@@ -120,7 +120,13 @@ func (a *App) routes() http.Handler {
 		respond(w, v, err)
 	}))
 	mux.HandleFunc("POST /api/rooms/{id}/join", a.withUser(func(w http.ResponseWriter, r *http.Request, u *auth.User) {
-		v, err := a.rooms.Join(r.PathValue("id"), u.ID, u.DisplayName, u.Avatar)
+		var in struct {
+			Password string `json:"password"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		v, err := a.rooms.JoinWithPassword(r.PathValue("id"), u.ID, u.DisplayName, u.Avatar, in.Password)
 		respond(w, v, err)
 	}))
 	mux.HandleFunc("POST /api/rooms/{id}/leave", a.withUser(func(w http.ResponseWriter, r *http.Request, u *auth.User) {
@@ -146,6 +152,7 @@ func (a *App) routes() http.Handler {
 		a.audioMu.Unlock()
 		reply(w, 200, map[string]bool{"ok": true})
 	}))
+	a.lobbyRoutes(mux)
 	mux.HandleFunc("POST /api/rooms/{id}/start", a.withUser(func(w http.ResponseWriter, r *http.Request, u *auth.User) {
 		v, err := a.rooms.Start(r.PathValue("id"), u.ID)
 		respond(w, v, err)
@@ -244,14 +251,16 @@ func (a *App) withUser(next func(http.ResponseWriter, *http.Request, *auth.User)
 }
 func (a *App) createRoom(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	var in struct {
-		Name     string `json:"name"`
-		Theme    string `json:"theme"`
-		Capacity int    `json:"capacity"`
+		Name       string `json:"name"`
+		Theme      string `json:"theme"`
+		Capacity   int    `json:"capacity"`
+		Password   string `json:"password"`
+		AutoFillAI *bool  `json:"autoFillAI"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	v, err := a.rooms.Create(u.ID, u.DisplayName, in.Name, in.Theme, in.Capacity, u.Avatar)
+	v, err := a.rooms.CreateWithOptions(u.ID, u.DisplayName, in.Name, in.Theme, in.Capacity, u.Avatar, game.CreateOptions{Password: in.Password, AutoFillAI: in.AutoFillAI})
 	if err != nil {
 		fail(w, 400, err)
 		return
@@ -321,6 +330,9 @@ func (a *App) events(w http.ResponseWriter, r *http.Request, u *auth.User) {
 			if err != nil {
 				if errors.Is(err, game.ErrRoomNotFound) {
 					_, _ = fmt.Fprint(w, "event: closed\ndata: {\"message\":\"房主已关闭房间\"}\n\n")
+					f.Flush()
+				} else if errors.Is(err, game.ErrNotMember) {
+					_, _ = fmt.Fprint(w, "event: removed\ndata: {\"message\":\"你已离开房间或被房主移除\"}\n\n")
 					f.Flush()
 				}
 				return
@@ -609,10 +621,21 @@ func fail(w http.ResponseWriter, status int, err error) {
 	if errors.Is(err, game.ErrRoomNotFound) {
 		status = http.StatusNotFound
 	}
-	if errors.Is(err, game.ErrNotOwner) {
+	if errors.Is(err, game.ErrNotOwner) || errors.Is(err, game.ErrHostOnly) || errors.Is(err, game.ErrNotMember) {
 		status = http.StatusForbidden
 	}
-	reply(w, status, map[string]string{"error": err.Error()})
+	body := map[string]string{"error": err.Error()}
+	if errors.Is(err, game.ErrPasswordRequired) || errors.Is(err, game.ErrInvalidPassword) {
+		status = http.StatusForbidden
+		body["code"] = "room_password_required"
+		if errors.Is(err, game.ErrInvalidPassword) {
+			body["code"] = "room_password_invalid"
+		}
+	}
+	if errors.Is(err, game.ErrJoinRateLimit) {
+		status = http.StatusTooManyRequests
+	}
+	reply(w, status, body)
 }
 func reply(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

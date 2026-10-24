@@ -30,6 +30,8 @@ type Room struct {
 	AgentActive   bool           `json:"-"`
 	Seeded        bool           `json:"seeded,omitempty"`
 	PendingSpeech *PendingSpeech `json:"pendingSpeech,omitempty"`
+	PasswordHash  string         `json:"passwordHash,omitempty"`
+	AutoFillAI    bool           `json:"autoFillAI"`
 }
 
 // PendingSpeech is private input, bound to one human and one turn. Only that
@@ -49,34 +51,42 @@ type PublicPlayer struct {
 	Bot      bool   `json:"bot"`
 	Alive    bool   `json:"alive"`
 	HasVoted bool   `json:"hasVoted"`
+	Ready    bool   `json:"ready"`
 }
 type Summary struct {
-	ID         string         `json:"id"`
-	Name       string         `json:"name"`
-	Theme      string         `json:"theme"`
-	Capacity   int            `json:"capacity"`
-	HumanCount int            `json:"humanCount"`
-	Phase      string         `json:"phase"`
-	Players    []PublicPlayer `json:"players"`
+	PasswordRequired bool           `json:"passwordRequired"`
+	AutoFillAI       bool           `json:"autoFillAI"`
+	AvailableSeats   int            `json:"availableSeats"`
+	HostPlayerID     string         `json:"hostPlayerId"`
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	Theme            string         `json:"theme"`
+	Capacity         int            `json:"capacity"`
+	HumanCount       int            `json:"humanCount"`
+	Phase            string         `json:"phase"`
+	Players          []PublicPlayer `json:"players"`
 }
 type View struct {
 	Summary
-	AgentActive     bool     `json:"agentActive"`
-	GameID          string   `json:"gameId"`
-	Version         int      `json:"version"`
-	IsHost          bool     `json:"isHost"`
-	MyPlayerID      string   `json:"myPlayerId"`
-	MyWord          string   `json:"myWord,omitempty"`
-	MyDraft         string   `json:"myDraft,omitempty"`
-	Round           int      `json:"round"`
-	CurrentPlayerID string   `json:"currentPlayerId"`
-	CandidateIDs    []string `json:"candidateIds"`
-	LegalTargets    []string `json:"legalTargets"`
-	Logs            []Log    `json:"logs"`
-	Winner          string   `json:"winner,omitempty"`
-	Reveals         []Reveal `json:"reveals"`
-	LastVotes       []Ballot `json:"lastVotes"`
-	Deadline        int64    `json:"deadline"`
+	LobbyPlayers     []PublicPlayer `json:"lobbyPlayers,omitempty"`
+	CanStart         bool           `json:"canStart"`
+	StartBlockReason string         `json:"startBlockReason,omitempty"`
+	AgentActive      bool           `json:"agentActive"`
+	GameID           string         `json:"gameId"`
+	Version          int            `json:"version"`
+	IsHost           bool           `json:"isHost"`
+	MyPlayerID       string         `json:"myPlayerId"`
+	MyWord           string         `json:"myWord,omitempty"`
+	MyDraft          string         `json:"myDraft,omitempty"`
+	Round            int            `json:"round"`
+	CurrentPlayerID  string         `json:"currentPlayerId"`
+	CandidateIDs     []string       `json:"candidateIds"`
+	LegalTargets     []string       `json:"legalTargets"`
+	Logs             []Log          `json:"logs"`
+	Winner           string         `json:"winner,omitempty"`
+	Reveals          []Reveal       `json:"reveals"`
+	LastVotes        []Ballot       `json:"lastVotes"`
+	Deadline         int64          `json:"deadline"`
 }
 type Manager struct {
 	mu            sync.Mutex
@@ -90,6 +100,7 @@ type Manager struct {
 	jobs          chan botJob
 	externalAgent bool
 	agentRooms    map[string]bool
+	joinAttempts  map[string]joinAttempt
 }
 type botJob struct {
 	RoomID, GameID string
@@ -107,7 +118,7 @@ func NewManager(store storage.RoomStore, bot Bot) (*Manager, error) {
 	if bot == nil {
 		bot = LocalBot{}
 	}
-	m := &Manager{rooms: map[string]*Room{}, subs: map[string]map[chan struct{}]struct{}{}, audio: map[string][]byte{}, store: store, done: map[string]chan struct{}{}, bot: bot, busy: map[string]bool{}, jobs: make(chan botJob, 128), agentRooms: map[string]bool{}}
+	m := &Manager{rooms: map[string]*Room{}, subs: map[string]map[chan struct{}]struct{}{}, audio: map[string][]byte{}, store: store, done: map[string]chan struct{}{}, bot: bot, busy: map[string]bool{}, jobs: make(chan botJob, 128), agentRooms: map[string]bool{}, joinAttempts: map[string]joinAttempt{}}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	records, err := store.Load(ctx)
@@ -121,6 +132,13 @@ func NewManager(store storage.RoomStore, bot Bot) (*Manager, error) {
 		}
 		if room.ID != id || id == "" || (room.Capacity != 4 && room.Capacity != 6) {
 			return nil, fmt.Errorf("invalid stored room %s", id)
+		}
+		var legacy struct {
+			AutoFillAI *bool `json:"autoFillAI"`
+		}
+		_ = json.Unmarshal(raw, &legacy)
+		if legacy.AutoFillAI == nil {
+			room.AutoFillAI = true
 		}
 		m.rooms[id] = &room
 		m.done[id] = make(chan struct{})
@@ -170,6 +188,11 @@ func (m *Manager) CloseRoom(id, uid string) error {
 		delete(m.done, id)
 	}
 	delete(m.agentRooms, id)
+	for key := range m.joinAttempts {
+		if strings.HasPrefix(key, id+"/") {
+			delete(m.joinAttempts, key)
+		}
+	}
 	for key := range m.audio {
 		if strings.HasPrefix(key, id+"/") {
 			delete(m.audio, key)
@@ -249,9 +272,15 @@ func phase(r *Room) string {
 	return "waiting"
 }
 func summary(r *Room) Summary {
-	s := Summary{ID: r.ID, Name: r.Name, Theme: r.Theme, Capacity: r.Capacity, HumanCount: humanCount(r), Phase: phase(r), Players: []PublicPlayer{}}
+	s := Summary{PasswordRequired: r.PasswordHash != "", AutoFillAI: r.AutoFillAI, ID: r.ID, Name: r.Name, Theme: r.Theme, Capacity: r.Capacity, HumanCount: humanCount(r), Phase: phase(r), Players: []PublicPlayer{}}
+	if lobbyPhase(r) {
+		s.AvailableSeats = r.Capacity - len(lobbyPlayers(r))
+	}
 	for _, p := range roomPlayers(r) {
-		s.Players = append(s.Players, PublicPlayer{ID: p.ID, Name: p.Name, Avatar: p.Avatar, Seat: p.Seat, Bot: p.Bot, Alive: p.Alive})
+		if !p.Bot && p.UserID == r.OwnerID {
+			s.HostPlayerID = p.ID
+		}
+		s.Players = append(s.Players, PublicPlayer{ID: p.ID, Name: p.Name, Avatar: p.Avatar, Seat: p.Seat, Bot: p.Bot, Alive: p.Alive, Ready: p.Ready || p.Bot})
 	}
 	return s
 }
@@ -287,7 +316,7 @@ func (m *Manager) View(id, uid string) (View, error) {
 		return View{}, ErrRoomNotFound
 	}
 	if member(r, uid) == nil {
-		return View{}, errors.New("请先加入房间")
+		return View{}, ErrNotMember
 	}
 	return view(r, uid), nil
 }
@@ -297,6 +326,13 @@ func view(r *Room, uid string) View {
 	if p == nil {
 		return v
 	}
+	if lobbyPhase(r) {
+		for _, p := range lobbyPlayers(r) {
+			v.LobbyPlayers = append(v.LobbyPlayers, PublicPlayer{ID: p.ID, Name: p.Name, Avatar: p.Avatar, Seat: p.Seat, Bot: p.Bot, Alive: p.Alive, Ready: p.Ready || p.Bot})
+		}
+	}
+	v.StartBlockReason = startBlockReason(r)
+	v.CanStart = lobbyPhase(r) && v.StartBlockReason == ""
 	v.AgentActive = r.AgentActive
 	v.MyPlayerID = p.ID
 	v.Logs = append(v.Logs, r.Logs...)
@@ -325,6 +361,9 @@ func view(r *Room, uid string) View {
 	return v
 }
 func (m *Manager) Create(uid, displayName, name, theme string, capacity int, avatar string) (View, error) {
+	return m.CreateWithOptions(uid, displayName, name, theme, capacity, avatar, CreateOptions{})
+}
+func (m *Manager) CreateWithOptions(uid, displayName, name, theme string, capacity int, avatar string, options CreateOptions) (View, error) {
 	name = strings.TrimSpace(name)
 	if n := utf8.RuneCountInString(name); n < 1 || n > 24 || strings.ContainsFunc(name, unicode.IsControl) {
 		return View{}, errors.New("房间名需要 1 至 24 字")
@@ -334,6 +373,14 @@ func (m *Manager) Create(uid, displayName, name, theme string, capacity int, ava
 	}
 	if theme != "jade" && theme != "peach" && theme != "night" {
 		theme = "jade"
+	}
+	passwordHash, err := hashPassword(options.Password)
+	if err != nil {
+		return View{}, err
+	}
+	autoFillAI := true
+	if options.AutoFillAI != nil {
+		autoFillAI = *options.AutoFillAI
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -352,7 +399,7 @@ func (m *Manager) Create(uid, displayName, name, theme string, capacity int, ava
 	if owned >= 5 {
 		return View{}, errors.New("最多创建五个房间")
 	}
-	r := &Room{ID: ID(), Name: name, Theme: theme, Capacity: capacity, OwnerID: uid, Players: []Player{{ID: ID(), UserID: uid, Name: displayName, Avatar: avatar, Seat: 1, Alive: true}}, Version: 1, CreatedAt: time.Now().UnixMilli()}
+	r := &Room{PasswordHash: passwordHash, AutoFillAI: autoFillAI, ID: ID(), Name: name, Theme: theme, Capacity: capacity, OwnerID: uid, Players: []Player{{ID: ID(), UserID: uid, Name: displayName, Avatar: avatar, Seat: 1, Alive: true}}, Version: 1, CreatedAt: time.Now().UnixMilli()}
 	m.rooms[r.ID] = r
 	if err := m.persistLocked(r); err != nil {
 		delete(m.rooms, r.ID)
@@ -365,17 +412,18 @@ func resetFinished(r *Room) {
 	if r.Game == nil {
 		return
 	}
-	r.Players = nil
-	for _, p := range r.Game.Players {
-		if !p.Bot {
-			p.Alive = true
-			p.Seat = len(r.Players) + 1
-			r.Players = append(r.Players, p)
-		}
-	}
+	r.Players = lobbyPlayers(r)
 	r.Game = nil
+	r.PendingSpeech = nil
 }
 func (m *Manager) Join(id, uid, name, avatar string) (View, error) {
+	return m.JoinWithPassword(id, uid, name, avatar, "")
+}
+func (m *Manager) JoinWithPassword(id, uid, name, avatar, password string) (View, error) {
+	hash, err := m.authorizeJoin(id, uid, password)
+	if err != nil {
+		return View{}, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.rooms[id]
@@ -388,6 +436,9 @@ func (m *Manager) Join(id, uid, name, avatar string) (View, error) {
 		}
 		return view(r, uid), nil
 	}
+	if hash != r.PasswordHash {
+		return View{}, ErrInvalidPassword
+	}
 	for _, other := range m.rooms {
 		if member(other, uid) != nil {
 			return View{}, errors.New("请先离开当前房间")
@@ -396,12 +447,27 @@ func (m *Manager) Join(id, uid, name, avatar string) (View, error) {
 	if phase(r) != "waiting" && phase(r) != "finished" {
 		return View{}, errors.New("这桌正在游戏，请稍后再来")
 	}
-	if humanCount(r) >= r.Capacity {
+	if len(lobbyPlayers(r)) >= r.Capacity {
 		return View{}, errors.New("这桌已经坐满了")
 	}
 	b := backup(r)
 	resetFinished(r)
-	r.Players = append(r.Players, Player{ID: ID(), UserID: uid, Name: name, Avatar: avatar, Seat: len(r.Players) + 1, Alive: true})
+	seat := 1
+	for ; seat <= r.Capacity; seat++ {
+		occupied := false
+		for _, p := range r.Players {
+			if p.Seat == seat {
+				occupied = true
+				break
+			}
+		}
+		if !occupied {
+			break
+		}
+	}
+	r.Players = append(r.Players, Player{ID: ID(), UserID: uid, Name: name, Avatar: avatar, Seat: seat, Alive: true})
+	sort.Slice(r.Players, func(i, j int) bool { return r.Players[i].Seat < r.Players[j].Seat })
+	resetReadiness(r)
 	if r.OwnerID == "" {
 		r.OwnerID = uid
 	}
@@ -433,11 +499,11 @@ func (m *Manager) Leave(id, uid string) error {
 		ps := r.Players[:0]
 		for _, p := range r.Players {
 			if p.UserID != uid {
-				p.Seat = len(ps) + 1
 				ps = append(ps, p)
 			}
 		}
 		r.Players = ps
+		resetReadiness(r)
 	}
 	if r.OwnerID == uid {
 		r.OwnerID = ""
@@ -470,30 +536,43 @@ func (m *Manager) Start(id, uid string) (View, error) {
 	if r.OwnerID != uid {
 		return View{}, errors.New("请等待房主开始发牌")
 	}
-	if phase(r) != "waiting" && phase(r) != "finished" {
-		return View{}, errors.New("游戏已经开始")
+	if reason := startBlockReason(r); reason != "" {
+		return View{}, errors.New(reason)
 	}
-	b := backup(r)
-	resetFinished(r)
-	names := []string{"小北", "阿岚", "大乔", "阿泽", "小满", "一禾"}
-	ps := append([]Player(nil), r.Players...)
-	for len(ps) < r.Capacity {
-		i := len(ps)
-		ps = append(ps, Player{ID: ID(), Name: names[i-1], Seat: i + 1, Bot: true, Alive: true})
+	ps := lobbyPlayers(r)
+	for i := range ps {
+		ps[i].Ready = false
 	}
+	for seat := 1; seat <= r.Capacity; seat++ {
+		occupied := false
+		for _, p := range ps {
+			if p.Seat == seat {
+				occupied = true
+				break
+			}
+		}
+		if !occupied {
+			ps = append(ps, Player{ID: ID(), Name: botName(seat), Seat: seat, Bot: true, Alive: true})
+		}
+	}
+	sort.Slice(ps, func(i, j int) bool { return ps[i].Seat < ps[j].Seat })
 	g, err := New(ps)
 	if err != nil {
 		return View{}, err
 	}
+	b := backup(r)
+	resetFinished(r)
+	resetReadiness(r)
 	r.Game = g
+	r.PendingSpeech = nil
 	r.Logs = nil
+	if err = m.commitLocked(r, b); err != nil {
+		return View{}, err
+	}
 	for key := range m.audio {
 		if strings.HasPrefix(key, id+"/") {
 			delete(m.audio, key)
 		}
-	}
-	if err = m.commitLocked(r, b); err != nil {
-		return View{}, err
 	}
 	return view(r, uid), nil
 }
@@ -571,6 +650,11 @@ func (m *Manager) StatusText(id, uid string) (string, error) {
 		return "", errors.New("请先加入房间")
 	}
 	g := room.Game
+	if lobbyPhase(room) {
+		if reason := startBlockReason(room); reason != "" {
+			return reason + "。", nil
+		}
+	}
 	if g == nil {
 		return "等待房主开始游戏。", nil
 	}
