@@ -1,0 +1,104 @@
+# 仅部署应用；PostgreSQL / Redis 使用 undercover-config 中的外部连接地址。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: undercover
+  namespace: builder
+  labels:
+    app: undercover
+spec:
+  # 游戏订阅、计时器和音频缓存目前由单个 Go 进程维护。
+  replicas: 1
+  # 先停止旧实例并释放数据库锁，再启动新实例；更新时会短暂中断连接。
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: undercover
+  template:
+    metadata:
+      labels:
+        app: undercover
+    spec:
+      # 私有 GHCR 镜像需要在同一命名空间创建此拉取凭证；公开镜像可删除此项。
+      imagePullSecrets:
+        - name: ghcr
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: undercover-env
+          configMap:
+            name: undercover-config
+            items:
+              - key: .env
+                path: .env
+            defaultMode: 0444
+      containers:
+        - name: undercover
+          image: ghcr.io/go-wyvern/undercover:main
+          imagePullPolicy: Always
+          workingDir: /app
+          ports:
+            - name: http
+              containerPort: 18080
+              protocol: TCP
+          volumeMounts:
+            - name: undercover-env
+              readOnly: true
+              mountPath: /app/.env
+              subPath: .env
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: undercover
+  namespace: builder
+  labels:
+    app: undercover
+spec:
+  type: ClusterIP
+  selector:
+    app: undercover
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

@@ -6,3 +6,6 @@
 web/node_modules/
 *.log
 .DS_Store
+
+# Actual cluster configuration; commit only the example.
+/deploy/configmap.yaml

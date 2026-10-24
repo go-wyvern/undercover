@@ -1,0 +1,33 @@
+# 复制为 deploy/configmap.yaml 后填写；真实配置文件已加入 Git 忽略规则。
+# 与 spxbench 一样，将 ConfigMap 的 .env 挂载到 /app/.env。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: undercover-config
+  namespace: builder
+data:
+  .env: |
+    UNDERCOVER_ADDR=0.0.0.0:18080
+    UNDERCOVER_ALLOW_GUEST=false
+
+    # 外部 PostgreSQL：先创建独立数据库，账号需要建表及读写权限。
+    # 替换域名、用户名和密码；TLS 参数按数据库服务要求调整。
+    DATABASE_URL="postgresql://undercover:change-me@postgres.example.internal:5432/undercover?sslmode=require"
+    # 外部 Redis：替换域名、账号、密码和 DB 编号；TLS 使用 rediss://。
+    REDIS_URL="redis://default:change-me@redis.example.internal:6379/0"
+
+    XBUILDER_ACCOUNT_BASE_URL=https://account.example.com
+    XBUILDER_ACCOUNT_CLIENT_ID=replace-with-your-client-id
+    XBUILDER_ACCOUNT_CLIENT_SECRET=replace-with-your-client-secret
+    # 与 XBuilder 登记的 HTTPS 回调地址完全一致。
+    XBUILDER_ACCOUNT_REDIRECT_URL=https://undercover.example.com/auth/callback
+    # 用 openssl rand -hex 32 生成，发布更新时保持不变。
+    UNDERCOVER_SESSION_SECRET=replace-with-a-random-secret-of-at-least-32-characters
+
+    # 替换为已经绑定灵矽智能体的软件终端 MAC；多个终端用英文逗号分隔。
+    LINX_DEVICE_IDS=02:00:00:00:00:01
+    # 通常留空，使用官方默认地址及 OTA 自动获取的设备 Token。
+    LINX_OTA_URL=
+    LINX_WS_URL=
+    LINX_WS_TOKEN=
+    LINX_API_KEY=

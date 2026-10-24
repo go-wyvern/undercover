@@ -13,8 +13,11 @@ concurrency:
 
 jobs:
   validate:
+    name: Integration tests (temporary databases)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # CI-only databases for integration tests; discarded with this job.
+    # These services are neither included in the image nor deployed to Kubernetes.
     services:
       postgres:
         image: postgres:17-alpine

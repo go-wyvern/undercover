@@ -164,6 +164,8 @@ web/dist/            构建产物，由 go:embed 嵌入
 2. 进入 **Actions → Publish undercover image → Run workflow**，选择 `main`。
 3. 工作流先构建前端并运行测试，包括真实 PostgreSQL/Redis 集成测试，成功后构建并推送镜像。
 
+`validate.services` 中的 PostgreSQL 和 Redis 只在 GitHub Actions 测试任务中临时运行，任务结束后销毁，不会打进应用镜像，也不会部署到服务器。线上应用始终通过 `DATABASE_URL` / `REDIS_URL` 连接外部服务。
+
 镜像地址为 `ghcr.io/go-wyvern/undercover:main`，另保留 `sha-<提交前七位>` 标签，支持 `linux/amd64` 与 `linux/arm64`。发布使用仓库自动提供的 `GITHUB_TOKEN` 和 `packages: write`，无需添加个人 GHCR Token。灵矽、XBuilder、数据库和 Redis 的配置均在运行时注入，不进入镜像或 Actions 构建配置。
 
 Dockerfile 分三阶段构建：Node.js 编译 Vue，Go 嵌入静态文件并交叉编译，最后使用带 CA 证书的非 root distroless 镜像运行服务。镜像不包含 Node.js、Go 工具链或本地 `.env`。
@@ -182,3 +184,35 @@ docker run -d --name undercover --restart unless-stopped \
 然后由 HTTPS 反向代理转发至本机 `18080`。请保持一个 Go 副本；PostgreSQL 与 Redis 独立部署，无需挂载 `data` 目录。首次发布的 GHCR Package 访问权限由 GitHub 决定；私有镜像需先登录 GHCR，若希望匿名拉取，可在 Package 设置中调整可见性。
 
 本地构建可执行 `docker build -t undercover:local .`。发布完成后，Actions Summary 会列出镜像标签及 digest，部署也可以固定使用 `ghcr.io/go-wyvern/undercover@sha256:...`。
+
+## Kubernetes 部署（ConfigMap + 外部 PostgreSQL / Redis）
+
+部署方式与 spxbench 一致：`undercover-config` 的 `.env` 键以只读文件挂载到 `/app/.env`，Go 启动时自动加载。`deploy/undercover.yaml` 仅包含应用 Deployment 和 Service，不会创建 PostgreSQL、Redis 或数据卷。默认命名空间为 `builder`；使用其他命名空间时，同步修改配置和部署文件中的 `metadata.namespace`。
+
+1. 复制 `deploy/configmap.yaml.example` 为 `deploy/configmap.yaml`，填写实际的外部数据库 / Redis 连接地址、XBuilder 配置和灵矽设备身份。`deploy/configmap.yaml` 已被 Git 忽略；不要把真实配置提交到仓库。
+2. 在 `builder` 命名空间准备名为 `ghcr` 的镜像拉取凭证，或把 Deployment 的 `imagePullSecrets` 改成已有凭证名称。公开镜像可删除此配置。
+3. 创建配置并部署应用：
+
+```sh
+kubectl apply -f deploy/configmap.yaml
+kubectl apply -f deploy/undercover.yaml
+kubectl -n builder rollout status deployment/undercover
+```
+
+也可以直接在 KubeSphere 创建 `undercover-config`，添加名为 `.env` 的键，将配置模板 `data[".env"]` 下面的环境变量内容填入；再应用 `deploy/undercover.yaml`。
+
+`DATABASE_URL` 和 `REDIS_URL` 必须填写 Pod 能访问的外部地址，不使用 `127.0.0.1`。PostgreSQL 数据库需提前创建，应用会自动建表；连接 URL 中账号或密码的特殊字符需做 URL 编码。数据库连接、会话和对局均不依赖容器本地目录。
+
+Service 名为 `undercover`，服务端口 `80`，转发到应用 `18080`。将现有 HTTPS Ingress / 网关转发到此 Service，并开启 WebSocket、关闭 SSE 缓冲；XBuilder 登记的回调地址使用同一个公开域名。
+
+当前只支持一个游戏进程，因此 Deployment 设置 `replicas: 1` 和 `strategy: Recreate`，更新时先退出旧进程、释放 PostgreSQL 锁，再启动新进程，会短暂中断连接。不要直接扩容副本。
+
+修改 ConfigMap 后需要重启应用；挂载采用 `subPath`，应用也只在启动时读取配置。修改配置或发布新的 `:main` 镜像后执行：
+
+```sh
+kubectl apply -f deploy/configmap.yaml
+kubectl -n builder rollout restart deployment/undercover
+kubectl -n builder rollout status deployment/undercover
+```
+
+以上命令由部署人员在目标集群执行；GitHub Actions 只负责验证和推送镜像，不连接线上 PostgreSQL / Redis，也不自动操作集群。
