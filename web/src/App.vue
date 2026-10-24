@@ -336,9 +336,6 @@ function tableCardWord(player?: Player) {
 function tableCardRole(player?: Player) {
   return room.value?.reveals.find(r => r.playerId === player?.id)?.role === 'undercover' ? '卧底' : '平民'
 }
-function initials(name = '') {
-  return Array.from(name).slice(-2).join('') || '玩家'
-}
 function openModal(value: typeof modal.value) {
   modal.value = value
   modalError.value = ''
@@ -767,12 +764,14 @@ onUnmounted(() => {
                 </p>
                 <div class="room-card-footer">
                   <div class="avatar-stack">
-                    <span v-for="n in Math.min(3, r.capacity)" :key="n" :class="`avatar-color-${n}`"
-                      ><template v-if="r.players[n - 1]">{{
-                        initials(r.players[n - 1]!.name)
-                      }}</template
-                      ><Bot v-else :size="15"
-                    /></span>
+                    <span v-for="n in Math.min(3, r.capacity)" :key="n" :class="`avatar-color-${n}`">
+                      <AccountAvatar
+                        v-if="r.players[n - 1] && !r.players[n - 1]!.bot"
+                        :src="r.players[n - 1]!.avatar"
+                        :name="r.players[n - 1]!.name"
+                      />
+                      <Bot v-else :size="15" />
+                    </span>
                   </div>
                   <span class="occupancy"
                     ><b>{{ r.humanCount }}</b> / {{ r.capacity }} 已入座</span
