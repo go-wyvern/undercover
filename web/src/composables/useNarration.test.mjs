@@ -88,7 +88,7 @@ test('cloud failure uses the browser voice with a visible source and player iden
   await until(() => instance.state.value === 'playing')
   assert.equal(instance.playbackSource.value, 'browser')
   assert.equal(instance.fallback.value, true)
-  assert.equal(spoken[0].text, '2号，小北。冬天也能见到。')
+  assert.equal(spoken[0].text, '2号：冬天也能见到。')
   assert.ok(errors[0].includes('浏览器语音'))
   spoken[0].onend()
   await until(() => instance.state.value === 'idle')

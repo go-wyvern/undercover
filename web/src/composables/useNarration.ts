@@ -7,7 +7,7 @@ type State = 'idle' | 'loading' | 'playing' | 'blocked' | 'error'
 
 export function spokenText(log: GameLog) {
   return log.kind === 'speech' && !log.audio
-    ? `${log.seat}号，${log.name}。${log.text}`
+    ? `${log.seat}号：${log.text}`
     : log.text
 }
 

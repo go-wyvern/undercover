@@ -104,7 +104,7 @@ func New(players []Player) (*Game, error) {
 			g.Words[p.ID] = Pairs[pair][1-swap]
 		}
 	}
-	g.addLog("host", nil, "牌已洗好，正在为大家分发词卡。请保管好自己的词，别让它溜出口。")
+	g.addLog("host", nil, "开始游戏。")
 	return g, nil
 }
 func (g *Game) Player(id string) *Player {
@@ -150,7 +150,6 @@ func (g *Game) Begin() {
 	g.Phase = "speaking"
 	g.Turn = 0
 	g.Deadline = time.Now().Add(60 * time.Second).UnixMilli()
-	g.addLog("host", nil, "第一轮开始。依次用一句话描述自己的词，不能直接说出词语。")
 	g.announceSpeaker()
 }
 func (g *Game) Speak(id, text string, audio bool) error {
@@ -174,7 +173,7 @@ func (g *Game) Skip(id string) error {
 	if g.CurrentID() != id {
 		return errors.New("还没轮到你发言")
 	}
-	g.addLog("host", nil, fmt.Sprintf("%d号本轮跳过发言。", g.Player(id).Seat))
+	g.addLog("host", nil, fmt.Sprintf("%d号跳过。", g.Player(id).Seat))
 	g.advanceSpeaker()
 	return nil
 }
@@ -185,7 +184,7 @@ func (g *Game) advanceSpeaker() {
 		g.Turn = 0
 		g.Votes = map[string]string{}
 		g.Deadline = time.Now().Add(60 * time.Second).UnixMilli()
-		g.addLog("host", nil, "发言结束。请投出你最怀疑的一位，投票完成后统一揭晓。")
+		g.addLog("host", nil, "请投票。")
 	} else {
 		g.Deadline = time.Now().Add(60 * time.Second).UnixMilli()
 		g.announceSpeaker()
@@ -193,7 +192,7 @@ func (g *Game) advanceSpeaker() {
 }
 func (g *Game) announceSpeaker() {
 	if p := g.Player(g.CurrentID()); p != nil {
-		g.addLog("host", nil, fmt.Sprintf("接下来请%d号，%s发言。", p.Seat, p.Name))
+		g.addLog("host", nil, fmt.Sprintf("请%d号发言。", p.Seat))
 	}
 }
 func (g *Game) LegalTargets(id string) []string {
@@ -228,18 +227,14 @@ func (g *Game) Vote(id, target string) error {
 func (g *Game) resolveVotes() {
 	counts := map[string]int{}
 	g.LastVotes = nil
-	parts := []string{}
 	for _, p := range g.Players {
 		if !p.Alive {
 			continue
 		}
 		target := g.Votes[p.ID]
 		g.LastVotes = append(g.LastVotes, Ballot{p.ID, target})
-		if target == "" {
-			parts = append(parts, fmt.Sprintf("%d号弃权", p.Seat))
-		} else {
+		if target != "" {
 			counts[target]++
-			parts = append(parts, fmt.Sprintf("%d号投%d号", p.Seat, g.Player(target).Seat))
 		}
 	}
 	top := 0
@@ -252,15 +247,24 @@ func (g *Game) resolveVotes() {
 			tied = append(tied, p.ID)
 		}
 	}
-	g.addLog("votes", nil, strings.Join(parts, "，")+"。")
+	parts := []string{}
+	for _, p := range g.Players {
+		if count := counts[p.ID]; count > 0 {
+			parts = append(parts, fmt.Sprintf("%d号%d票", p.Seat, count))
+		}
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "全部弃权")
+	}
+	g.addLog("votes", nil, "投票结果："+strings.Join(parts, "，")+"。")
 	if top == 0 {
-		g.addLog("host", nil, "大家都选择了弃权，这轮无人出局。")
+		g.addLog("host", nil, "本轮无人出局。")
 		g.nextRound()
 		return
 	}
 	if len(tied) > 1 {
 		if len(g.Candidates) > 0 {
-			g.addLog("host", nil, "加投仍然平票，本轮无人出局。请用新的描述打破僵局。")
+			g.addLog("host", nil, "再次平票，无人出局。")
 			g.nextRound()
 			return
 		}
@@ -273,7 +277,7 @@ func (g *Game) resolveVotes() {
 		for _, id := range tied {
 			seats = append(seats, fmt.Sprintf("%d号", g.Player(id).Seat))
 		}
-		g.addLog("host", nil, strings.Join(seats, "、")+"平票。请依次补充一句描述，然后仅对平票玩家加投。")
+		g.addLog("host", nil, strings.Join(seats, "、")+"平票。")
 		g.announceSpeaker()
 		return
 	}
@@ -281,13 +285,13 @@ func (g *Game) resolveVotes() {
 	out.Alive = false
 	if out.ID == g.UndercoverID {
 		g.Winner = "civilian"
-		g.finish(fmt.Sprintf("%d号获得%d票，是卧底。平民阵营获胜！", out.Seat, top))
+		g.finish(fmt.Sprintf("%d号%d票，是卧底，平民获胜。", out.Seat, top))
 		return
 	}
-	g.addLog("host", nil, fmt.Sprintf("%d号获得%d票，遗憾出局。他是平民。", out.Seat, top))
+	g.addLog("host", nil, fmt.Sprintf("%d号%d票出局，是平民。", out.Seat, top))
 	if len(g.Alive()) <= 2 {
 		g.Winner = "undercover"
-		g.finish("卧底成功存活到最后两人，卧底阵营获胜！")
+		g.finish("卧底获胜。")
 		return
 	}
 	g.nextRound()
@@ -295,7 +299,7 @@ func (g *Game) resolveVotes() {
 func (g *Game) finish(text string) {
 	g.Phase = "finished"
 	g.Deadline = 0
-	g.addLog("host", nil, text+" 词卡现已揭晓，可以查看本局复盘。")
+	g.addLog("host", nil, text)
 }
 func (g *Game) nextRound() {
 	g.Round++
@@ -304,8 +308,7 @@ func (g *Game) nextRound() {
 	g.Phase = "speaking"
 	g.Turn = 0
 	g.Deadline = time.Now().Add(60 * time.Second).UnixMilli()
-	g.addLog("host", nil, fmt.Sprintf("第%d轮开始，还剩%d位玩家。请补充一个新的特点。", g.Round, len(g.Alive())))
-	g.announceSpeaker()
+	g.addLog("host", nil, fmt.Sprintf("继续游戏，请%d号发言。", g.Player(g.CurrentID()).Seat))
 }
 func (g *Game) Reveals() []Reveal {
 	if g.Phase != "finished" {

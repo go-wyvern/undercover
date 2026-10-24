@@ -496,7 +496,7 @@ func (a *App) audio(w http.ResponseWriter, r *http.Request, u *auth.User) {
 		if creator {
 			text := l.Text
 			if l.Kind == "speech" && !l.Audio {
-				text = fmt.Sprintf("%d号，%s。%s", l.Seat, l.Name, text)
+				text = fmt.Sprintf("%d号：%s", l.Seat, text)
 			}
 			// One listener cancelling playback must not interrupt synthesis for the table.
 			go a.synthesizeNarration(key, event, text, pending)

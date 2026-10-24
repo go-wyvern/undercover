@@ -95,7 +95,7 @@ func (m *Manager) SafeHostText(id, uid, text string) (string, error) {
 	if g := r.Game; g != nil && g.Phase != "finished" {
 		for _, word := range g.Words {
 			if strings.Contains(text, word) {
-				return "词卡请在自己的私密区域查看。我们继续根据公开描述寻找线索。", nil
+				return "请查看自己的词卡。", nil
 			}
 		}
 	}

@@ -41,6 +41,7 @@ import RoomArt from './components/RoomArt.vue'
 import { api, ApiError } from './api'
 import { usePushToTalk } from './composables/usePushToTalk'
 import { useNarration } from './composables/useNarration'
+import { seatPosition as relativeSeatPosition, tableCardPosition as relativeCardPosition } from './composables/tableLayout'
 import type { AccountInfo, AudioCue, Config, GameLog, Player, RoomSummary, RoomView, User } from './types'
 
 const config = ref<Config>({
@@ -302,29 +303,10 @@ const voiceHint = computed(() => {
 })
 
 function seatPosition(number: number) {
-  const positions =
-    room.value?.capacity === 6
-      ? [
-          [50, 91],
-          [12, 70],
-          [12, 25],
-          [50, 7],
-          [88, 25],
-          [88, 70],
-        ]
-      : [
-          [50, 91],
-          [10, 47],
-          [50, 7],
-          [90, 47],
-        ]
-  const point = positions[number - 1]!
-  return { left: `${point[0]}%`, top: `${point[1]}%`, '--seat-index': number - 1 }
+  return relativeSeatPosition(number, me.value?.seat || 1, room.value?.capacity === 6 ? 6 : 4)
 }
 function tableCardPosition(number: number) {
-  const position = seatPosition(number)
-  return { left: `${parseFloat(position.left) === 50 ? number === 1 ? 65 : 40 : 50 + (parseFloat(position.left) - 50) * .65}%`,
-    top: `${48 + (parseFloat(position.top) - 48) * .66}%`, '--card-rotation': `${number % 2 ? -7 : 7}deg` }
+  return relativeCardPosition(number, me.value?.seat || 1, room.value?.capacity === 6 ? 6 : 4)
 }
 function tableCardWord(player?: Player) {
   if (!player) return ''
@@ -385,7 +367,7 @@ function updateRoom(value: RoomView, initial = false) {
     for (const log of added) knownLogs.add(log.id)
     narration.enqueue(
       value.id,
-      added.filter((log) => log.source === 'linx_agent' ? !(voice.assistant.value && voice.recognizing.value) : !value.agentActive && log.playerId !== value.myPlayerId),
+      added.filter((log) => log.source === 'linx_agent' ? !(voice.assistant.value && voice.recognizing.value) : log.playerId !== value.myPlayerId && (!value.agentActive || log.kind === 'speech' && value.players.some(player => player.id === log.playerId && !player.bot))),
       config.value.voiceConfigured,
     )
   }
