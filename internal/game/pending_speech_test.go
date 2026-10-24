@@ -14,6 +14,7 @@ func TestRecognizedSpeechStaysPrivateSurvivesReloadAndCannotTimeoutIntoSkip(t *t
 	m, _ := NewManager(store, nil)
 	_, _ = m.Join("room-1", "host", "房主", "")
 	_, _ = m.Join("room-1", "other", "新一", "")
+	_, _ = m.SetReady("room-1", "other", true)
 	_, _ = m.Start("room-1", "host")
 	m.mu.Lock()
 	m.rooms["room-1"].Game.Begin()

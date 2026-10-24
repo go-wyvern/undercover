@@ -3503,3 +3503,48 @@ svg {
 @media (max-width: 760px) {
   .room-heading-right .close-room-button { min-height: 32px; padding: 7px 9px; font-size: 10px; gap: 5px; }
 }
+
+
+/* Pre-game preparation and host controls. */
+.lobby-controls {
+  background: #fdfef9;
+  border: 1px solid #dce5d0;
+  border-radius: 16px;
+  padding: 20px;
+}
+.lobby-controls-heading, .lobby-controls-heading h2, .protected-label,
+.ai-fill-setting, .ai-fill-setting > span, .room-option, .room-option > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lobby-controls-heading { justify-content: space-between; }
+.lobby-controls-heading h2 { font-size: 16px; }
+.protected-label { font-size: 11px; color: #7b8d6c; }
+.readiness-summary { padding: 18px 0 12px; }
+.readiness-summary b { display: block; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.readiness-summary p, .host-start-note, .lobby-fill-note, .readiness-reset-note {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #859478;
+}
+.readiness-summary p { margin-top: 5px; }
+.ready-button { width: 100%; margin-bottom: 14px; justify-content: center; }
+.host-start-note { margin-bottom: 14px; }
+.ai-fill-setting { justify-content: space-between; padding: 12px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.ai-fill-setting input, .room-option input { width: 18px; height: 18px; accent-color: var(--green); cursor: pointer; }
+.lobby-seat-list { list-style: none; padding: 0; margin: 4px 0 12px; }
+.lobby-seat-list li { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid #edf0e6; }
+.lobby-seat-number { font-size: 10px; color: #91a082; width: 16px; flex-shrink: 0; }
+.lobby-seat-avatar { width: 32px; height: 32px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: #70885f; }
+.lobby-seat-copy { min-width: 0; flex: 1; }
+.lobby-seat-copy b { font-size: 12px; display: flex; align-items: center; gap: 5px; overflow-wrap: anywhere; }
+.lobby-seat-copy small { font-weight: 400; font-size: 10px; color: #91a082; }
+.lobby-seat-copy > span { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #91a082; margin-top: 3px; }
+.player-ready, .lobby-seat-copy > span.player-ready { color: #477849; }
+.lobby-seat-action { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; font-size: 11px; color: #607b51; border: 1px solid #dce5d0; padding: 6px 8px; border-radius: 7px; }
+.lobby-seat-action:hover:not(:disabled) { background: #edf3e4; }
+.lobby-seat-action:disabled { opacity: .5; }
+.readiness-reset-note { font-size: 10px; }
+.room-option { justify-content: space-between; padding: 14px 0 0; font-size: 13px; }
+.room-card-title h3 { display: flex; align-items: center; gap: 7px; }

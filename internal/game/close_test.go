@@ -23,6 +23,7 @@ func TestCloseRoomAuthorizationDurabilityAndFailure(t *testing.T) {
 	if err = m.CloseRoom(created.ID, "friend"); !errors.Is(err, ErrNotOwner) {
 		t.Fatal("non-host deleted a room")
 	}
+	_, _ = m.SetReady(created.ID, "friend", true)
 	if _, err = m.Start(created.ID, "owner"); err != nil {
 		t.Fatal(err)
 	}

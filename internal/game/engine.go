@@ -12,6 +12,7 @@ import (
 )
 
 type Player struct {
+	Ready  bool   `json:"ready"`
 	ID     string `json:"id"`
 	UserID string `json:"userId,omitempty"`
 	Name   string `json:"name"`

@@ -42,6 +42,7 @@ func TestAccountAvatarsPersistAndUpdateExistingSeats(t *testing.T) {
 			t.Fatal("lobby avatar missing")
 		}
 	}
+	_, _ = m.SetReady(created.ID, "friend", true)
 	before, err := m.Start(created.ID, "owner")
 	if err != nil {
 		t.Fatal(err)

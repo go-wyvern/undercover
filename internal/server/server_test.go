@@ -111,6 +111,9 @@ func TestEmbeddedFrontendAndProtectedGameFlow(t *testing.T) {
 		clients = append(clients, c)
 		c.post(t, "/api/rooms/room-1/join", map[string]string{}, 200).Body.Close()
 	}
+	for _, guest := range clients[1:] {
+		guest.post(t, "/api/rooms/room-1/ready", map[string]bool{"ready": true}, 200).Body.Close()
+	}
 	c := clients[0]
 	clients[1].post(t, "/api/rooms/room-1/start", map[string]string{}, 400).Body.Close()
 	v := readView(t, c.post(t, "/api/rooms/room-1/start", map[string]string{}, 200))

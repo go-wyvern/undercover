@@ -13,6 +13,7 @@ import {
   Headphones,
   LoaderCircle,
   LogOut,
+  LockKeyhole,
   Trash2,
   MessageCircle,
   Mic,
@@ -38,6 +39,7 @@ import {
 import RobotMascot from './components/RobotMascot.vue'
 import AccountAvatar from './components/AccountAvatar.vue'
 import RoomArt from './components/RoomArt.vue'
+import LobbyControls from './components/LobbyControls.vue'
 import { api, ApiError } from './api'
 import { usePushToTalk } from './composables/usePushToTalk'
 import { useNarration } from './composables/useNarration'
@@ -59,11 +61,16 @@ const bootError = ref('')
 const busy = ref(false)
 const search = ref('')
 const filter = ref('all')
-const modal = ref<'login' | 'create' | 'rules' | 'leave' | 'close' | null>(null)
+const modal = ref<'login' | 'create' | 'rules' | 'leave' | 'close' | 'join' | 'remove' | null>(null)
 const nickname = ref('')
 const roomName = ref('')
 const roomCapacity = ref(4)
 const roomTheme = ref('jade')
+const protectedRoom = ref(false)
+const roomPassword = ref('')
+const joinPassword = ref('')
+const autoFillAI = ref(true)
+const removingPlayer = ref<Player | null>(null)
 const modalError = ref('')
 const toast = ref('')
 const draft = ref('')
@@ -230,6 +237,8 @@ const phaseHint = computed(() => {
   if (!room.value) return ''
   if (audibleCue.value?.playerId) return `正在听 ${audibleCue.value.seat} 号发言，留意这句话里的线索`
   if (listeningToPlayers.value) return 'AI 玩家已准备好描述，正在等待语音播报'
+  if (room.value.phase === 'waiting' && room.value.startBlockReason) return room.value.startBlockReason
+  if (room.value.phase === 'waiting' && !room.value.autoFillAI) return '这一桌已坐满，等房主开始游戏'
   if (room.value.phase === 'waiting')
     return config.value.voiceConfigured
       ? room.value.isHost ? '朋友随时可加入，准备好后对灵矽说“开始游戏”' : '大家已入座，等待房主对灵矽说“开始游戏”'
@@ -299,6 +308,7 @@ const dealerCaption = computed(() => {
   const r = room.value
   if (!r) return ''
   if (r.phase === 'dealing') return '嘘，你的秘密正在路上…'
+  if (r.phase === 'waiting' && r.startBlockReason) return r.startBlockReason
   if (r.phase === 'waiting')
     return config.value.voiceConfigured
       ? r.isHost ? '牌已洗好，跟我说“开始游戏”吧。' : '等房主说“开始游戏”，就能发牌。'
@@ -394,6 +404,9 @@ function subscribe(id: string) {
     reconnecting.value = false
     updateRoom(JSON.parse((event as MessageEvent).data))
   })
+  stream.addEventListener('removed', () => {
+    if (source === stream) void returnToLobby('你已离开房间或被房主移除')
+  })
   stream.addEventListener('closed', () => {
     if (source === stream) void returnToLobby('房主已关闭房间')
   })
@@ -404,8 +417,8 @@ function subscribe(id: string) {
     if (source !== stream) return
     reconnecting.value = true
     void api<RoomView>(`/api/rooms/${encodeURIComponent(id)}`).catch((error) => {
-      if (source === stream && error instanceof ApiError && error.status === 404)
-        void returnToLobby('房间已关闭')
+      if (source === stream && error instanceof ApiError && [403, 404].includes(error.status))
+        void returnToLobby(error.status === 404 ? '房间已关闭' : '你已离开房间或被房主移除')
     })
   }
 }
@@ -414,6 +427,8 @@ function enter(value: RoomView) {
   history.replaceState(null, '', `/room/${encodeURIComponent(value.id)}`)
   subscribe(value.id)
   pendingRoom = ''
+  joinPassword.value = ''
+  roomPassword.value = ''
   modal.value = null
 }
 async function refreshRooms() {
@@ -442,21 +457,36 @@ async function boot() {
     loading.value = false
   }
 }
-async function joinRoom(id: string) {
+async function joinRoom(id: string, password?: string) {
   prepareNarration()
   if (!user.value) {
     pendingRoom = id
     openModal('login')
     return
   }
+  if (password === undefined && rooms.value.find(r => r.id === id)?.passwordRequired) {
+    pendingRoom = id
+    joinPassword.value = ''
+    openModal('join')
+    return
+  }
   busy.value = true
+  modalError.value = ''
   try {
-    enter(await api<RoomView>(`/api/rooms/${encodeURIComponent(id)}/join`, {}))
+    enter(await api<RoomView>(`/api/rooms/${encodeURIComponent(id)}/join`, { password: password || '' }))
   } catch (error) {
-    notify((error as Error).message)
+    if (error instanceof ApiError && error.code?.startsWith('room_password_')) {
+      pendingRoom = id
+      if (modal.value !== 'join') { joinPassword.value = ''; openModal('join') }
+      if (error.code === 'room_password_invalid') modalError.value = error.message
+    } else if (modal.value === 'join') modalError.value = (error as Error).message
+    else notify((error as Error).message)
   } finally {
     busy.value = false
   }
+}
+function submitRoomPassword() {
+  if (pendingRoom && !busy.value) void joinRoom(pendingRoom, joinPassword.value)
 }
 async function guestLogin() {
   busy.value = true
@@ -485,6 +515,9 @@ function requestCreate() {
     return
   }
   roomName.value = `${user.value.displayName}的卧底局`
+  roomPassword.value = ''
+  protectedRoom.value = false
+  autoFillAI.value = true
   openModal('create')
 }
 async function createRoom() {
@@ -497,6 +530,8 @@ async function createRoom() {
         name: roomName.value,
         capacity: roomCapacity.value,
         theme: roomTheme.value,
+        password: protectedRoom.value ? roomPassword.value : '',
+        autoFillAI: autoFillAI.value,
       }),
     )
     await refreshRooms()
@@ -507,15 +542,31 @@ async function createRoom() {
   }
 }
 async function action(path: string, body: unknown = {}) {
-  if (!room.value || busy.value) return
+  if (!room.value || busy.value) return false
+  const id = room.value.id
   if (path === 'start' || path === 'speech') prepareNarration()
   busy.value = true
   try {
-    updateRoom(await api<RoomView>(`/api/rooms/${encodeURIComponent(room.value.id)}/${path}`, body))
+    const value = await api<RoomView>(`/api/rooms/${encodeURIComponent(id)}/${path}`, body)
+    if (room.value?.id !== id) return false
+    updateRoom(value)
+    return true
   } catch (error) {
     notify((error as Error).message)
+    return false
   } finally {
     busy.value = false
+  }
+}
+function requestRemove(player: Player) {
+  removingPlayer.value = player
+  openModal('remove')
+}
+async function removeMember() {
+  if (!removingPlayer.value) return
+  if (await action(`members/${encodeURIComponent(removingPlayer.value.id)}/remove`)) {
+    modal.value = null
+    removingPlayer.value = null
   }
 }
 function audioBase64(data: Uint8Array) {
@@ -736,7 +787,7 @@ onUnmounted(() => {
               :key="r.id"
               class="room-card"
               :disabled="
-                busy || !['waiting', 'finished'].includes(r.phase) || r.humanCount >= r.capacity
+                busy || !['waiting', 'finished'].includes(r.phase) || r.availableSeats === 0
               "
               @click="joinRoom(r.id)"
             >
@@ -750,7 +801,7 @@ onUnmounted(() => {
               </div>
               <div class="room-card-body">
                 <div class="room-card-title">
-                  <h3>{{ r.name }}</h3>
+                  <h3><LockKeyhole v-if="r.passwordRequired" :size="16" />{{ r.name }}</h3>
                   <span class="room-enter"><ArrowUpRight :size="20" /></span>
                 </div>
                 <p>
@@ -775,7 +826,7 @@ onUnmounted(() => {
                   </div>
                   <span class="occupancy"
                     ><b>{{ r.humanCount }}</b> / {{ r.capacity }} 已入座</span
-                  ><span class="ai-fill"><Sparkles :size="12" />AI 可补位</span>
+                  ><span class="ai-fill"><Sparkles :size="12" />{{ r.autoFillAI ? 'AI 可补位' : '等待坐满' }}</span>
                 </div>
               </div>
             </button>
@@ -885,7 +936,7 @@ onUnmounted(() => {
                 <button
                   v-if="!config.voiceConfigured && (room.phase === 'waiting' || room.phase === 'finished')"
                   class="deal-button"
-                  :disabled="!room.isHost || busy"
+                  :disabled="!room.isHost || !room.canStart || busy"
                   @click="action('start')"
                 >
                   <LoaderCircle v-if="busy" class="spin" :size="17" /><RotateCcw
@@ -999,14 +1050,16 @@ onUnmounted(() => {
                   ><span>{{ seat.player?.name || '等待入座' }}</span
                   ><span v-if="seat.player?.id === room.myPlayerId" class="you-tag">你</span
                   ><Crown
-                    v-if="seat.player?.id === room.myPlayerId && room.isHost"
+                    v-if="seat.player?.id === room.hostPlayerId"
                     :size="12"
                     class="host-crown"
                   />
                 </div>
                 <span class="seat-caption">{{
                   seat.player
-                    ? !seat.player.alive
+                    ? room.phase === 'waiting' && !seat.player.bot
+                      ? seat.player.id === room.hostPlayerId ? '房主 · 等待开局' : seat.player.ready ? '已准备' : '待准备'
+                      : !seat.player.alive
                       ? '已出局 · 观战中'
                       : seat.player.id === speakingPlayerId
                         ? '正在发言'
@@ -1017,7 +1070,7 @@ onUnmounted(() => {
                           : seat.player.bot
                             ? 'AI 玩家'
                             : '已入座'
-                    : '空位将由 AI 补齐'
+                    : room.autoFillAI ? '空位将由 AI 补齐' : '等待朋友入座'
                 }}</span>
               </div>
             </div>
@@ -1037,6 +1090,10 @@ onUnmounted(() => {
             <div class="phase-progress"><div :style="{ width: `${turnProgress}%` }"></div></div>
           </section>
           <aside class="game-sidebar">
+            <LobbyControls v-if="['waiting', 'finished'].includes(room.phase)" :room="room" :busy="busy" :voice-configured="config.voiceConfigured"
+              @ready="action('ready', { ready: $event })"
+              @auto-fill="action('settings', { autoFillAI: $event })"
+              @ai-seat="action('ai-seat', $event)" @remove="requestRemove" />
             <section
               v-if="room.phase !== 'waiting' && room.phase !== 'dealing'"
               class="word-card"
@@ -1214,7 +1271,7 @@ onUnmounted(() => {
         aria-modal="true"
         :aria-label="{
           login: '登录入座', create: '创建房间', rules: '游戏规则',
-          leave: '离开房间', close: '关闭房间',
+          leave: '离开房间', close: '关闭房间', join: '输入房间口令', remove: '移除成员',
         }[modal]"
       >
         <button class="modal-close icon-button" aria-label="关闭" @click="modal = null">
@@ -1259,6 +1316,29 @@ onUnmounted(() => {
             ><ShieldCheck :size="12" /> 私密词卡只对本人展示</span
           ></template
         >
+        <template v-else-if="modal === 'join'">
+          <div class="modal-symbol"><LockKeyhole :size="26" /></div>
+          <h2>这一桌，需要口令。</h2>
+          <p class="modal-description">向房主获取口令，和朋友一起入座。</p>
+          <form @submit.prevent="submitRoomPassword">
+            <label class="field-label" for="join-password">房间口令</label>
+            <input id="join-password" v-model="joinPassword" class="form-input" type="password"
+              minlength="4" maxlength="32" autocomplete="off" placeholder="请输入房间口令" required />
+            <p v-if="modalError" class="form-error" role="alert">{{ modalError }}</p>
+            <button class="button primary modal-submit" :disabled="busy || !joinPassword">
+              <LoaderCircle v-if="busy" class="spin" :size="17" />验证并入座<ArrowRight :size="17" />
+            </button>
+          </form>
+        </template>
+        <template v-else-if="modal === 'remove'">
+          <div class="modal-symbol"><Users :size="26" /></div>
+          <h2>移除{{ removingPlayer?.name }}？</h2>
+          <p class="modal-description">该成员将返回大厅，其余同桌需要重新准备。对方仍可重新加入。</p>
+          <div class="modal-actions">
+            <button class="button secondary" :disabled="busy" @click="modal = null">取消</button>
+            <button class="button danger" :disabled="busy" @click="removeMember">确认移除</button>
+          </div>
+        </template>
         <template v-else-if="modal === 'create'"
           ><div class="modal-symbol"><Plus :size="26" /></div>
           <div class="eyebrow">MAKE SOME ROOM</div>
@@ -1299,6 +1379,13 @@ onUnmounted(() => {
                 <span></span>{{ name }}<Check v-if="roomTheme === theme" :size="14" />
               </button>
             </div>
+            <label class="room-option"><span><LockKeyhole :size="16" />使用房间口令</span><input v-model="protectedRoom" type="checkbox" /></label>
+            <template v-if="protectedRoom">
+              <label class="field-label" for="room-password">设置口令</label>
+              <input id="room-password" v-model="roomPassword" class="form-input" type="password"
+                minlength="4" maxlength="32" autocomplete="new-password" placeholder="4 至 32 字，分享链接后另行告知朋友" required />
+            </template>
+            <label class="room-option"><span><Bot :size="16" />空位自动由 AI 补齐</span><input v-model="autoFillAI" type="checkbox" /></label>
             <p v-if="modalError" class="form-error">{{ modalError }}</p>
             <button class="button primary modal-submit" :disabled="busy || !roomName.trim()">
               创建并入座<ArrowRight :size="17" />

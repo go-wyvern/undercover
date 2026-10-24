@@ -12,21 +12,41 @@
 | GET | `/auth/callback` | OAuth 回调 |
 | POST | `/auth/logout` | 撤销会话，并离开当前房间 |
 | GET | `/api/rooms` | 大厅列表，仅公开信息 |
-| POST | `/api/rooms` | 创建并入座，`name`、`theme`、`capacity` |
+| POST | `/api/rooms` | 创建并入座，`name`、`theme`、`capacity`，可选 `password`、`autoFillAI`（默认 true） |
 | GET | `/api/rooms/{id}` | 当前成员的个性化房间快照 |
-| POST | `/api/rooms/{id}/join` | 加入房间 |
+| POST | `/api/rooms/{id}/join` | 加入房间，口令房需传 `password`；已有成员可直接恢复 |
+| POST | `/api/rooms/{id}/ready` | 设置本人准备状态，`ready: boolean` |
+| POST | `/api/rooms/{id}/settings` | 房主设置 `autoFillAI: boolean` |
+| POST | `/api/rooms/{id}/ai-seat` | 房主安排/移除 AI 席位，`seat: number`、`bot: boolean` |
+| POST | `/api/rooms/{id}/members/{playerId}/remove` | 房主移除其他真人成员 |
 | POST | `/api/rooms/{id}/leave` | 离开，游戏中改为 AI 接续 |
 | DELETE | `/api/rooms/{id}` | 仅当前房主可关闭，永久删除房间及本局记录 |
-| POST | `/api/rooms/{id}/start` | 房主开始，空位补 AI |
+| POST | `/api/rooms/{id}/start` | 仅房主开始，校验其他真人准备状态，按房间配置补 AI |
 | POST | `/api/rooms/{id}/speech` | `text`；可附 `audio`（base64 PCM16LE、16kHz 单声道，最长30秒） |
 | POST | `/api/rooms/{id}/skip` | 跳过自己的发言 |
 | POST | `/api/rooms/{id}/vote` | `targetId`，空字符串表示弃权 |
-| GET | `/api/rooms/{id}/events` | SSE，`room` 为个性化快照，`closed` 表示房间已关闭 |
+| GET | `/api/rooms/{id}/events` | SSE，`room` 为个性化快照，`closed` 表示房间已关闭，`removed` 表示已离席或被移除 |
 | GET | `/api/rooms/{id}/assistant/voice` | 完整灵矽语音对话，STT → 大模型 → MCP 游戏工具 → 主持回复音频 |
 | GET | `/api/rooms/{id}/voice` | 浏览器同源 WebSocket，仅自己的发言/投票回合可连接 |
 | GET | `/api/rooms/{id}/audio/{event}` | 本房间公开发言的音频，不接受任意文本 |
 
 房间快照仅包含 `myWord`，不包含完整 Words 映射或卧底 ID。只有 `finished` 阶段返回 `reveals`。每次状态变化增加 version，前端忽略过期快照。SSE 断线重连后发送当前快照，不需要重放动作。
+
+## 开局准备、口令与房主管理
+
+新建房间可设置 4 至 32 字的口令，省略或留空表示公开房。大厅仍展示口令房，但只返回 `passwordRequired` 布尔标记；通过分享链接或直接请求 join 也必须校验口令。口令以随机盐 PBKDF2-SHA256 派生值保存，不返回给前端、SSE 或灵矽上下文。连续口令验证按账号和房间限为每分钟 5 次；达到限制返回 429。
+
+缺少口令返回 403 和 `code: "room_password_required"`，错误口令返回 403 和 `code: "room_password_invalid"`。已经在房间中的账号可以不再提供口令来恢复当前席位；这不允许新账号绕过校验。
+
+等待开局或上一局结束时，非房主点击准备或取消准备；房主发起开局即视为本人准备，其他真人必须全部准备。`game.start` 与 HTTP start 共用同一服务端校验，拒绝时提示尚未准备的座号与名字。成功发牌后清除本局准备状态，下一局需要重新确认。
+
+房主可切换空位自动补 AI（`autoFillAI`），也可为指定空位预留 AI 或移除预留 AI。预留 AI 占用座位，真人加入时选择首个真正的空位；关闭自动补位后，必须由真人或预留 AI 坐满才能开局。预留 AI 随下一局保留，自动补位 AI 仅服务当前局。旧房间没有此字段时默认继续自动补位。
+
+加入、离席、移除成员、调整 AI 席位或修改补位设置，均清除所有真人的准备状态；离席保留其他成员座号，房主转移后由新房主继续管理。相同设置的重复请求不重置准备状态。上述房间设置、预留 AI 与准备状态通过 PostgreSQL 的房间 JSON 保存，重启后恢复。游戏进行中拒绝准备状态、补位设置及房主管理动作，正常主动离席仍沿用 AI 接续规则。
+
+快照新增 `hostPlayerId`、玩家的 `ready`、`autoFillAI`、`passwordRequired`、`availableSeats`、`canStart` 与 `startBlockReason`。`lobbyPlayers` 仅在等待/结束时提供下一局座位，结束时 `players` 仍保留上一局完整揭牌信息。准备状态变更经 SSE 实时推送。修改准备状态只接受 `ready`，不接受用户/座位参数；房主管理由服务端验证身份。
+
+被移除成员立即失去房间、音频、语音和 SSE 的访问权限。已有 SSE 发送 `removed` 事件后关闭；页面停止录音与播放并返回大厅。移除不是封禁，对方可按原加入条件重新入座，并触发重新准备。
 
 ## 关闭房间
 
