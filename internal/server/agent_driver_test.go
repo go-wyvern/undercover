@@ -17,7 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func TestAutomaticLinxTurnUsesGameToolsAndCachesTimedAudio(t *testing.T) {
+func TestAutomaticLinxTurnNarratesOneCommittedPlayerBeforeTheNext(t *testing.T) {
 	a, err := newTestApp(Config{Auth: auth.Config{AllowGuest: true}})
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,7 @@ func TestAutomaticLinxTurnUsesGameToolsAndCachesTimedAudio(t *testing.T) {
 		t.Fatal(err)
 	}
 	batch, _ := a.rooms.NextAIBatch("room-1", "u")
-	if batch == nil || len(batch.Tasks) != 3 {
+	if batch == nil || len(batch.Tasks) != 1 {
 		t.Fatal("missing AI batch")
 	}
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +66,7 @@ func TestAutomaticLinxTurnUsesGameToolsAndCachesTimedAudio(t *testing.T) {
 				break
 			}
 		}
+		batch, _ := a.rooms.NextAIBatch("room-1", "u")
 		actions := []game.AIAction{}
 		for _, task := range batch.Tasks {
 			actions = append(actions, game.AIAction{PlayerSeat: task.Seat, Text: "它在日常生活当中有很多不同的用途。"})
@@ -79,11 +80,14 @@ func TestAutomaticLinxTurnUsesGameToolsAndCachesTimedAudio(t *testing.T) {
 		if strings.Contains(string(raw), `"isError":true`) {
 			t.Error("agent actions rejected")
 		}
-		for i, seat := range []string{"二", "三", "四"} {
-			_ = ws.WriteJSON(map[string]string{"type": "tts", "state": "sentence_start", "text": seat + "号：它在日常生活当中有很多不同的用途。"})
-			_ = ws.WriteMessage(websocket.BinaryMessage, make([]byte, 3200*(i+1)))
-		}
+
+		// The model's untrusted post-tool narration must be discarded, in text and PCM.
+		_ = ws.WriteJSON(map[string]string{"type": "tts", "state": "start"})
+		_ = ws.WriteJSON(map[string]string{"type": "tts", "state": "sentence_start", "text": "aiBatch为null，让我检查当前状态。"})
+		_ = ws.WriteMessage(websocket.BinaryMessage, []byte{99, 0, 99, 0})
 		_ = ws.WriteJSON(map[string]string{"type": "tts", "state": "stop"})
+		replyCommittedLines(ws)
+
 	}))
 	defer mock.Close()
 	a.voice, err = linx.New(linx.Config{DeviceIDs: []string{"02:00:00:00:00:01"}, WSURL: strings.Replace(mock.URL, "http", "ws", 1), Token: "mock"})
@@ -91,29 +95,37 @@ func TestAutomaticLinxTurnUsesGameToolsAndCachesTimedAudio(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.commandPCM = make([]byte, 640)
-	if err = a.advanceAgentTurn(context.Background(), "room-1", "u"); err != nil {
-		t.Fatal(err)
-	}
-	v, _ := a.rooms.View("room-1", "u")
-	if v.Phase != "voting" || v.AgentActive {
-		t.Fatal("AI turn did not finish")
-	}
-	last := v.Logs[len(v.Logs)-1]
-	if last.Source != "linx_agent" || len(last.AudioCues) != 3 {
-		t.Fatal("missing actual agent audio cues")
-	}
-	for i, cue := range last.AudioCues {
-		if cue.Seat != i+2 || cue.PlayerID == "" || cue.LogID == "" {
-			t.Fatalf("cue has wrong speaker: %+v", cue)
+
+	for seat := 2; seat <= 4; seat++ {
+		if err = a.advanceAgentTurn(context.Background(), "room-1", "u"); err != nil {
+			t.Fatal(err)
 		}
-		expected := []int64{0, 100, 300}[i]
-		if cue.OffsetMS != expected {
-			t.Fatalf("offset %d instead of %d", cue.OffsetMS, expected)
+		view, _ := a.rooms.View("room-1", "u")
+		count := 0
+		for _, log := range view.Logs {
+			if log.Source == "linx_agent" || strings.Contains(log.Text, "aiBatch") {
+				t.Fatal("untrusted model commentary was published")
+			}
+			if log.Kind == "speech" {
+				count++
+				if log.Seat == seat && !bytes.HasPrefix(a.audioCache["room-1/"+log.ID], []byte("RIFF")) {
+					t.Fatal("committed player audio was not ready")
+				}
+			}
+		}
+		if count != seat || view.AgentActive {
+			t.Fatal("AI advanced another player before narrating this one")
+		}
+		if seat < 4 {
+			next, _ := a.rooms.NextAIBatch("room-1", "u")
+			if next == nil || len(next.Tasks) != 1 || next.Tasks[0].Seat != seat+1 {
+				t.Fatal("wrong following AI task")
+			}
+		} else if view.Phase != "voting" {
+			t.Fatal("AI descriptions did not reach voting")
 		}
 	}
-	if !bytes.HasPrefix(a.audioCache["room-1/"+last.ID], []byte("RIFF")) {
-		t.Fatal("agent voice not cached")
-	}
+
 }
 func TestContinuationWAVResamplingAndInvalidInput(t *testing.T) {
 	wav := linx.PCMToWAVAtRate(make([]byte, 4800), 24000)

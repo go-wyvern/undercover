@@ -92,6 +92,23 @@ func (m *Manager) SafeHostText(id, uid, text string) (string, error) {
 	if r == nil || member(r, uid) == nil {
 		return "", errors.New("无法访问房间")
 	}
+	lower := strings.ToLower(text)
+	for _, marker := range []string{"aibatch", "batchid", "yourword", "currentutterance", "game.", "tools/call", "<think", "</think", "jsonrpc"} {
+		if strings.Contains(lower, marker) {
+			if g := r.Game; g != nil {
+				if p := g.Player(g.CurrentID()); p != nil {
+					return fmt.Sprintf("请%d号发言。", p.Seat), nil
+				}
+				if g.Phase == "voting" {
+					return "请投票。", nil
+				}
+				if g.Phase == "finished" {
+					return "本局已结束。", nil
+				}
+			}
+			return "准备好后，说开始游戏。", nil
+		}
+	}
 	if g := r.Game; g != nil && g.Phase != "finished" {
 		for _, word := range g.Words {
 			if strings.Contains(text, word) {
@@ -163,7 +180,8 @@ func aiBatch(g *Game) *AIBatch {
 		if copied.Phase == "voting" {
 			copied.Votes[task.PlayerID] = ""
 		} else {
-			copied.Turn++
+			// Commit and narrate one AI description before requesting the next.
+			break
 		}
 	}
 	if len(batch.Tasks) == 0 {

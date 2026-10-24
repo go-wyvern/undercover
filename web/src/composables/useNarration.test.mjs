@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { useNarration } from './useNarration.ts'
+import { narrationEntries, useNarration } from './useNarration.ts'
 
 const log = (id, text = `描述${id}`) => ({ id, kind: 'host', text, round: 1, at: 1 })
 let media, spoken, fetches, blocked, failed, preferences
@@ -141,4 +141,29 @@ test('cached group narration advances avatar cues by media time, not download ti
   await until(() => instance.state.value === 'idle')
   assert.equal(instance.activeCue.value,null)
   assert.equal(instance.completedLog.value.id,'reply')
+})
+
+
+test('a committed human or AI speech plays before the next prompt without waiting for a group reply', async () => {
+  instance = useNarration(() => {})
+  const own = {...log('human', '这是一个吃的东西。'), kind:'speech', seat:1, playerId:'me', audio:true}
+  const prompt = log('next', '请2号发言。')
+  const ai = {...log('ai3', '它经常出现在人们聚会的时候。'), kind:'speech', seat:3, playerId:'bot3'}
+  instance.enqueue('room', narrationEntries([own,prompt], true), true)
+  await until(() => instance.state.value === 'playing')
+  assert.equal(instance.activeLog.value, 'human')
+  assert.equal(instance.playbackSource.value, 'recording')
+  assert.equal(instance.activeCue.value.playerId, 'me')
+  // A later committed AI does not interrupt the current speaker or prompt.
+  instance.enqueue('room', narrationEntries([ai], true), true)
+  assert.equal(fetches.length, 1)
+  media.at(-1).onended()
+  await until(() => instance.activeLog.value === 'next' && instance.state.value === 'playing')
+  media.at(-1).onended()
+  await until(() => instance.activeLog.value === 'ai3' && instance.state.value === 'playing')
+  assert.equal(instance.activeCue.value.seat, 3)
+  assert.equal(fetches.length, 3)
+  media.at(-1).onended()
+  await until(() => instance.state.value === 'idle')
+  assert.deepEqual(narrationEntries([{...log('free'),source:'linx_agent'}],true), [])
 })

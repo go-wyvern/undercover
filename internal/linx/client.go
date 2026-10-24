@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gorilla/websocket"
 )
@@ -344,7 +345,30 @@ func (p *Provider) Synthesize(ctx context.Context, identity, text string) ([]byt
 		return nil, err
 	}
 	defer s.Close()
-	_ = s.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	return s.synthesizeText(ctx, text, false)
+}
+
+// SynthesizeText reuses a game session after its tool has committed. Only audio
+// whose sentence text matches this authoritative line can leave this path.
+func (s *Session) SynthesizeText(ctx context.Context, text string) ([]byte, error) {
+	return s.synthesizeText(ctx, text, true)
+}
+func speechText(text string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsPunct(r) || unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, text)
+}
+func (s *Session) synthesizeText(ctx context.Context, text string, verifyText bool) ([]byte, error) {
+	deadline := time.Now().Add(30 * time.Second)
+	if until, ok := ctx.Deadline(); ok && until.Before(deadline) {
+		deadline = until
+	}
+	_ = s.Conn.SetReadDeadline(deadline)
+	defer s.Conn.SetReadDeadline(time.Time{})
+	var err error
 	if err = s.WriteJSON(map[string]any{"type": "abort", "session_id": s.SessionID}); err != nil {
 		return nil, err
 	}
@@ -353,12 +377,18 @@ func (p *Provider) Synthesize(ctx context.Context, identity, text string) ([]byt
 	}
 	var packets [][]byte
 	size := 0
+	var spoken strings.Builder
+	allowed := !verifyText
+	expected := speechText(text)
 	for {
 		kind, b, err := s.Conn.ReadMessage()
 		if err != nil {
 			return nil, err
 		}
 		if kind == websocket.BinaryMessage {
+			if !allowed {
+				continue
+			}
 			if len(b) > 65024 {
 				return nil, errors.New("invalid Opus packet size")
 			}
@@ -373,9 +403,27 @@ func (p *Provider) Synthesize(ctx context.Context, identity, text string) ([]byt
 		if json.Unmarshal(b, &m) != nil {
 			continue
 		}
-		if m.Type == "tts" && m.State == "stop" && m.IsAborted {
+		if m.Type == "tts" && (m.State == "start" || m.State == "stop" && m.IsAborted) {
 			packets = nil
 			size = 0
+			spoken.Reset()
+			allowed = !verifyText
+			continue
+		}
+		if verifyText && m.Type == "tts" && m.State == "sentence_start" {
+			spoken.WriteString(speechText(m.Text))
+			allowed = strings.HasPrefix(expected, spoken.String())
+			if !allowed {
+				packets = nil
+				size = 0
+			}
+			continue
+		}
+		if verifyText && m.Type == "tts" && m.State == "stop" && spoken.String() != expected {
+			packets = nil
+			size = 0
+			spoken.Reset()
+			allowed = false
 			continue
 		}
 		if m.Type == "tts" && m.State == "stop" && len(packets) > 0 {

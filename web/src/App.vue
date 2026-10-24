@@ -40,7 +40,7 @@ import AccountAvatar from './components/AccountAvatar.vue'
 import RoomArt from './components/RoomArt.vue'
 import { api, ApiError } from './api'
 import { usePushToTalk } from './composables/usePushToTalk'
-import { useNarration } from './composables/useNarration'
+import { narrationEntries, useNarration } from './composables/useNarration'
 import { seatPosition as relativeSeatPosition, tableCardPosition as relativeCardPosition } from './composables/tableLayout'
 import type { AccountInfo, AudioCue, Config, GameLog, Player, RoomSummary, RoomView, User } from './types'
 
@@ -147,14 +147,9 @@ function rememberCue(cue: AudioCue | null) {
   if (cue?.logId) heardLogs.value = new Set([...heardLogs.value, cue.logId])
 }
 watch(audibleCue, rememberCue)
-watch(voice.completedReply, () => {
-  heardLogs.value = new Set([...heardLogs.value, ...(room.value?.logs.filter(l => l.kind === 'speech').map(l => l.id) || [])])
-})
 watch(narration.completedLog, (log) => {
   if (!log) return
   const ids = log.audioCues?.flatMap(cue => cue.logId ? [cue.logId] : []) || []
-  // If the agent paraphrased a description, expose its record after the reply ends.
-  if (log.source === 'linx_agent') ids.push(...(room.value?.logs.filter(l => l.kind === 'speech').map(l => l.id) || []))
   heardLogs.value = new Set([...heardLogs.value, log.id, ...ids])
 })
 const visibleLogs = computed(() => {
@@ -353,21 +348,13 @@ function updateRoom(value: RoomView, initial = false) {
     pcm.value = null
     if (!voice.assistant.value) voice.cancel()
   }
-  if (value.agentActive && !previous?.agentActive) narration.cancel()
   room.value = value
   if (!initial) {
-    // A cloud conversation may commit its tools then lose its final audio.
-    // Recover those public descriptions through per-player narration.
-    if (previous?.agentActive && !value.agentActive) {
-      const unheard = value.logs.filter(log => log.kind === 'speech' && value.players.find(p => p.id === log.playerId)?.bot && !historicalLogs.has(log.id) && !heardLogs.value.has(log.id))
-      const hasReply = unheard.length && value.logs.some(log => log.source === 'linx_agent' && log.at >= unheard[0]!.at)
-      if (unheard.length && !hasReply) narration.enqueue(value.id, unheard, config.value.voiceConfigured)
-    }
     const added = value.logs.filter((log) => !knownLogs.has(log.id))
     for (const log of added) knownLogs.add(log.id)
     narration.enqueue(
       value.id,
-      added.filter((log) => log.source === 'linx_agent' ? !(voice.assistant.value && voice.recognizing.value) : log.playerId !== value.myPlayerId && (!value.agentActive || log.kind === 'speech' && value.players.some(player => player.id === log.playerId && !player.bot))),
+      narrationEntries(added, voice.assistant.value && voice.recognizing.value),
       config.value.voiceConfigured,
     )
   }

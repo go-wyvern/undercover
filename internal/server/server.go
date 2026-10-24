@@ -482,6 +482,14 @@ func (a *App) audio(w http.ResponseWriter, r *http.Request, u *auth.User) {
 		return
 	}
 	key := id + "/" + event
+	// A committed line may arrive over SSE before its same-session Linx TTS.
+	// Wait for that cache entry instead of competing for the occupied terminal.
+	if err := a.waitForAgentAudio(r.Context(), id, u.ID, key); err != nil {
+		if r.Context().Err() == nil {
+			fail(w, 404, err)
+		}
+		return
+	}
 	a.audioMu.Lock()
 	data := a.audioCache[key]
 	pending := a.audioPending[key]
@@ -527,6 +535,31 @@ func (a *App) audio(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	_, _ = w.Write(data)
 }
+func (a *App) waitForAgentAudio(ctx context.Context, id, uid, key string) error {
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		a.audioMu.Lock()
+		cached := len(a.audioCache[key]) > 0
+		a.audioMu.Unlock()
+		if cached {
+			return nil
+		}
+		view, err := a.rooms.View(id, uid)
+		if err != nil {
+			return err
+		}
+		if !view.AgentActive {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 func (a *App) synthesizeNarration(key, event, text string, pending *audioCall) {
 	id, _, _ := strings.Cut(key, "/")
 	done := a.rooms.Done(id)

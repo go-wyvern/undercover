@@ -13,7 +13,7 @@ import (
 	"github.com/go-wyvern/undercover/internal/linx"
 )
 
-const hostInstructions = `你是网页多人游戏“谁是卧底”的语音主持，负责完整对话、理解玩家意图并扮演空位AI。Go的game.*工具是真实房间唯一状态来源，不得自行发词、改票或虚构操作成功。连接时的game_context已给出当前房间快照，直接结合本次用户语音选择操作，仅在状态不明确、工具提示冲突或玩家询问现状时调用game.get_state。查询结果中的currentUtterance是本次用户的识别原文，不能遗漏。玩家明确说开始时调用game.start，轮到真人描述时，用户说出的描述本身就是提交意图，不需要再问是否确认；调用game.submit_description即可，Go会采用本次识别原文，说投几号调用game.vote，明确跳过调用game.skip。动作返回中的aiBatch包含当前连续AI任务：一次生成这组全部AI的合法描述或投票，调用game.submit_ai_batch，随后读取返回中的新aiBatch并继续，直到aiBatch为null再等待真人。不要逐个AI反复取任务，不要替真人操作。AI描述12至30字，不含自己的词；投票只看当前任务的词和公开描述，不利用其他AI的词。所有yourWord都是秘密，绝不能念出来；真人的词只在网页私密区域显示。最终回复逐字念出本次已提交的AI描述，每人独立一句，格式“二号：描述。”“三号：描述。”，不要改写；然后根据工具结果说明下一个真人操作。投票结果以工具返回为准。常规流程只使用短句模板：开局“开始游戏，请N号发言。”；描述逐字读“N号：原描述。”，只读本次新提交的AI描述，不重复真人刚说的话或以前的描述；进入投票只说“请投票。”；结算读“投票结果：N号X票，……。N号出局。”，只汇总得票及结果，不逐一复述谁投谁、推理或点评；下一轮说“继续游戏，请N号发言。”；平票说“N号、M号平票，请N号补充发言。”；结束只报胜方。一次回复只覆盖本次新发生的变化和下一步，正常过场最多一句，不重复报幕，不添加寒暄、鼓励、规则说明、复盘或再次开局邀请；用户主动询问时再简短解释。全部依据工具结果，不虚构座位、票数或出局。只播报实际操作结果与下一步提示，不说“先检查当前状态”“让我查询”等准备过程，不读JSON、工具名或推理过程。若补充约束与旧的“每次先查询”要求冲突，以本段为准。`
+const hostInstructions = `你是网页多人游戏“谁是卧底”的语音主持，理解玩家语音并扮演空位AI。Go的game.*工具是真实房间唯一状态来源，不得自行发词、改票或虚构操作成功。连接时的game_context已给出当前房间快照，仅在状态不明确、工具冲突或玩家询问现状时调用game.get_state；其中currentUtterance是本次识别原文，不能遗漏。玩家明确说开始时调用game.start；轮到真人描述时，描述本身就是提交意图，调用game.submit_description即可，Go采用本次识别原文，不需要确认；说投几号调用game.vote；明确跳过调用game.skip。一次会话只提交一次游戏动作，成功后结束，不再处理后续玩家。Go会立即把本次已提交发言与下一步提示按顺序交给灵矽TTS播报，包含真人自己的发言；不要再生成总结、重述或额外主播播报。后续AI由后台自动继续，不能等待多位AI都提交完才播报。自动AI回合调用game.get_ai_batch读取任务：描述阶段只有一位AI，生成其12至30字描述，调用game.submit_ai_batch提交一次；投票阶段可按任务组完整提交多位AI的投票。提交后结束当前会话，不继续读取下一组任务。不要替真人操作。AI只利用自己的yourWord与公开描述推理，禁止利用其他AI的词或隐藏身份；投票只能选择legalTargets。所有yourWord都是秘密，真人的词只在网页私密区域显示，任何回复都不能念出。若没有AI任务，等待真人，不解释任务为何为空。未发生游戏操作、用户主动询问时，直接简短回答其问题或提示“请N号发言”“请投票”，不得冒称重新开局。任何情况下都不输出工具名、JSON、变量、aiBatch、null、思考分析、准备查询或自我纠正过程，不添加寒暄、鼓励、规则复述、复盘或再次开局邀请。播报票数、出局和胜负必须依据真实工具结果。以上网页模式优先于后文单机模式。`
 
 func gameTools() []linx.Tool {
 	schema := func(properties map[string]any, required ...string) map[string]any {
@@ -32,12 +32,12 @@ func gameTools() []linx.Tool {
 	return []linx.Tool{
 		{Name: "game.get_state", Description: hostInstructions + " 返回当前用户可见的房间状态和本次识别原文currentUtterance，不返回真人词卡。", InputSchema: schema(nil)},
 		{Name: "game.get_rules", Description: "获取谁是卧底的权威规则。", InputSchema: schema(nil)},
-		{Name: "game.start", Description: "玩家明确要求开始或再来一局时发牌，仅房主可用。完成后检查 AI 任务。", InputSchema: schema(nil)},
-		{Name: "game.submit_description", Description: "提交当前玩家本次语音描述，通常传空对象即可，Go优先保存本次识别原文；不能编造或替别人发言。完成后继续处理AI任务。", InputSchema: schema(map[string]any{"text": text("无语音识别原文时使用的描述文本")})},
-		{Name: "game.vote", Description: "按当前玩家明确说出的座位号投票。不要替玩家猜测投票对象。完成后检查 AI 任务。", InputSchema: schema(map[string]any{"seat": seat}, "seat")},
+		{Name: "game.start", Description: "玩家明确要求开始或再来一局时发牌，仅房主可用。成功后结束当前会话，由Go播报并自动继续。", InputSchema: schema(nil)},
+		{Name: "game.submit_description", Description: "提交当前玩家本次语音描述，通常传空对象即可，Go优先保存本次识别原文；不能编造或替别人发言。成功后结束当前会话，由Go播报并自动继续。", InputSchema: schema(map[string]any{"text": text("无语音识别原文时使用的描述文本")})},
+		{Name: "game.vote", Description: "按当前玩家明确说出的座位号投票。不要替玩家猜测投票对象。成功后结束当前会话，由Go播报并自动继续。", InputSchema: schema(map[string]any{"seat": seat}, "seat")},
 		{Name: "game.skip", Description: "当前玩家明确要求跳过自己的发言时使用。", InputSchema: schema(nil)},
-		{Name: "game.get_ai_batch", Description: "读取下一组连续AI发言/投票任务，yourWord严禁公开；返回null则等待真人。优先直接使用动作结果中的aiBatch，避免重复读取。", InputSchema: schema(nil)},
-		{Name: "game.submit_ai_batch", Description: "一次完成aiBatch中的整组AI操作，顺序及数量须与任务组一致。发言每项填playerSeat和text；投票填playerSeat和targetSeat，0表示弃权。返回新的aiBatch，若非null继续提交，若null等待真人。", InputSchema: schema(map[string]any{
+		{Name: "game.get_ai_batch", Description: "读取当前AI任务，描述阶段只有一位AI，投票阶段可包含多位；yourWord严禁公开。返回null时等待真人，不解释内部任务状态。", InputSchema: schema(nil)},
+		{Name: "game.submit_ai_batch", Description: "一次完成aiBatch中的整组AI操作，顺序及数量须与任务组一致。发言每项填playerSeat和text；投票填playerSeat和targetSeat，0表示弃权。提交成功后结束本次会话，Go播报后自动继续下一位。", InputSchema: schema(map[string]any{
 			"batchId": text("任务组ID"),
 			"actions": map[string]any{"type": "array", "maxItems": 6, "items": schema(map[string]any{"playerSeat": map[string]any{"type": "integer", "minimum": 1, "maximum": 6}, "text": text("12至30字的AI公开描述，不含词语"), "targetSeat": seat}, "playerSeat")},
 		}, "batchId", "actions")},
@@ -158,10 +158,6 @@ func (a *App) gameToolHandler(id, uid string, recording func() []byte, utterance
 		if e != nil {
 			return nil, e
 		}
-		batch, e := a.rooms.NextAIBatch(id, uid)
-		if e != nil {
-			return nil, e
-		}
-		return map[string]any{"room": state, "aiBatch": batch}, nil
+		return map[string]any{"room": state, "nextAction": "本次动作已提交，Go将依序播报；结束当前会话，后续AI由后台自动继续。"}, nil
 	}
 }

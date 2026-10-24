@@ -394,7 +394,7 @@ func TestCancellingOneListenerPreservesSharedPCMNarration(t *testing.T) {
 	}
 }
 
-func TestFullAssistantKeepsModelToolsAndReplyAudioAfterTranscription(t *testing.T) {
+func TestFullAssistantUsesModelToolsAndNarratesCommittedEventsAfterTranscription(t *testing.T) {
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ws, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
 		if err != nil {
@@ -447,15 +447,9 @@ func TestFullAssistantKeepsModelToolsAndReplyAudioAfterTranscription(t *testing.
 		if strings.Contains(string(raw), "myWord") {
 			t.Error("tool exposed a human card")
 		}
-		// Duplicate request ID must return the cached success, not start another game.
-		repeated := rpc(3, "tools/call", map[string]any{"name": "game.start", "arguments": map[string]any{}})
-		duplicate, _ := json.Marshal(repeated)
-		if string(raw) != string(duplicate) {
-			t.Error("MCP retry repeated a mutation")
-		}
-		_ = ws.WriteJSON(map[string]string{"type": "tts", "state": "sentence_start", "text": "词卡已经发好，请一号玩家描述。"})
-		_ = ws.WriteMessage(websocket.BinaryMessage, []byte{0, 0, 1, 0, 0, 0})
-		_ = ws.WriteJSON(map[string]string{"type": "tts", "state": "stop"})
+
+		replyCommittedLines(ws)
+
 	}))
 	defer mock.Close()
 	a, err := newTestApp(Config{Auth: auth.Config{AllowGuest: true}, Linx: linx.Config{DeviceIDs: []string{"02:00:00:00:00:01"}, Token: "test", WSURL: strings.Replace(mock.URL, "http", "ws", 1)}})
@@ -504,8 +498,8 @@ func TestFullAssistantKeepsModelToolsAndReplyAudioAfterTranscription(t *testing.
 			break
 		}
 	}
-	if !sawAudio {
-		t.Fatal("PCM audio was buffered until completion instead of streamed")
+	if sawAudio {
+		t.Fatal("game action bypassed the ordered room narration queue")
 	}
 
 	v := c.view(t, "room-1")
@@ -513,8 +507,8 @@ func TestFullAssistantKeepsModelToolsAndReplyAudioAfterTranscription(t *testing.
 		t.Fatal("voice start did not mutate game")
 	}
 	last := v.Logs[len(v.Logs)-1]
-	if last.Source != "linx_agent" {
-		t.Fatal("actual model reply not published")
+	if last.Source == "linx_agent" || last.Text != "请1号发言。" {
+		t.Fatal("a model summary replaced the committed game prompt")
 	}
 	response, err := c.http.Get(srv.URL + "/api/rooms/room-1/audio/" + last.ID)
 	if err != nil {

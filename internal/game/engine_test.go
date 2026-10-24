@@ -328,7 +328,7 @@ func TestAgentConversationPausesExpiredTurnsAndReleasesControl(t *testing.T) {
 	}
 }
 
-func TestAIBatchIsAtomicAndWaitsForHumanBallots(t *testing.T) {
+func TestAISpeechesCommitIndividuallyAndBallotsWaitForHumans(t *testing.T) {
 	m, _ := NewManager(testsupport.NewRooms(true), nil)
 	_, _ = m.Join("room-1", "u", "玩家", "")
 	_, _ = m.Start("room-1", "u")
@@ -345,14 +345,14 @@ func TestAIBatchIsAtomicAndWaitsForHumanBallots(t *testing.T) {
 	defer release()
 	_, _ = m.Speak("room-1", "u", "它在日常生活里非常常见。", nil)
 	batch, err := m.NextAIBatch("room-1", "u")
-	if err != nil || batch == nil || len(batch.Tasks) != 3 {
-		t.Fatal("expected three consecutive AI tasks")
+	if err != nil || batch == nil || len(batch.Tasks) != 1 {
+		t.Fatal("expected one AI description before narration")
 	}
 	actions := []AIAction{}
 	for _, task := range batch.Tasks {
 		actions = append(actions, AIAction{PlayerSeat: task.Seat, Text: "它在生活的许多场景里都有用处。"})
 	}
-	actions[2].Text = "我的词是月亮"
+	actions[0].Text = "我的词是太阳"
 	before, _ := m.View("room-1", "u")
 	if err = m.SubmitAIBatch("room-1", "u", batch.BatchID, actions); err == nil {
 		t.Fatal("invalid last description was accepted")
@@ -361,12 +361,31 @@ func TestAIBatchIsAtomicAndWaitsForHumanBallots(t *testing.T) {
 	if after.Version != before.Version || len(after.Logs) != len(before.Logs) {
 		t.Fatal("partial batch leaked into authoritative game")
 	}
-	actions[2].Text = "它在许多人的生活当中都会出现。"
+	actions[0].Text = "它在许多人的生活当中都会出现。"
 	if err = m.SubmitAIBatch("room-1", "u", batch.BatchID, actions); err != nil {
 		t.Fatal(err)
 	}
 	if err = m.SubmitAIBatch("room-1", "u", batch.BatchID, actions); err == nil {
 		t.Fatal("replayed batch executed twice")
+	}
+	view, _ := m.View("room-1", "u")
+	speeches := 0
+	for _, log := range view.Logs {
+		if log.Kind == "speech" {
+			speeches++
+		}
+	}
+	if speeches != 2 || view.CurrentPlayerID != view.Players[2].ID {
+		t.Fatal("later AI descriptions were committed before their own narration")
+	}
+	for seat := 3; seat <= 4; seat++ {
+		batch, _ = m.NextAIBatch("room-1", "u")
+		if batch == nil || len(batch.Tasks) != 1 || batch.Tasks[0].Seat != seat {
+			t.Fatal("AI description order changed")
+		}
+		if err = m.SubmitAIBatch("room-1", "u", batch.BatchID, []AIAction{{PlayerSeat: seat, Text: "它在许多人的生活当中都会出现。"}}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if batch, _ = m.NextAIBatch("room-1", "u"); batch != nil {
 		t.Fatal("AI ballots must wait until humans have voted")

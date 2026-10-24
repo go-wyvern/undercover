@@ -52,11 +52,11 @@ data: {"message":"房主已关闭房间"}
 
 ## 完整智能体会话
 
-`/assistant/voice` 允许房间成员在等待、描述、投票或结束阶段与主持交谈。客户端等待 `ready` 后发送 PCM，松开后发 `stop`。收到 `transcript` 仅展示用户原话并保持连接；收到 `assistant_done` 才结束。本房间的 SSE 会带来 `source: "linx_agent"` 的主持记录；音频接口返回缓存的真实灵矽回复。`agentActive` 标记主持正在处理该房间，期间不重复播放工具产生的流程日志。
+`/assistant/voice` 允许房间成员在等待、描述、投票或结束阶段与主持交谈。客户端等待 `ready` 后发送 PCM，松开后发 `stop`。收到 `transcript` 仅展示用户原话并保持连接；收到 `assistant_done` 才结束。成功动作通过 SSE 推送原发言与固定提示，所有成员（包括发言本人）立即按记录入队，播放原声或该记录的灵矽合成音频。`agentActive` 不会暂停或清空此队列。若本条 TTS 未就绪，音频接口等待当前会话的缓存；动作完成后返回 `assistant_done`，`streamed` 为 `"false"`，可不含 `id` 和 `text`。未执行动作的普通询问仍可保存为 `source: "linx_agent"` 的主持记录并实时播放。
 
 端侧 MCP 通过同一条服务端灵矽 WebSocket 自动注册。公开状态中不包含真人词卡，AI 任务的秘密词只交给灵矽模型。任务组 ID 用于阻止过期 AI 操作，所有工具都使用当前会话账号和房间。
 
-实时 PCM 下，`ready` 包含 `audioFormat` 与 `sampleRate`（字符串）。客户端保留录音时已解锁的 AudioContext；`assistant_sentence` 提供 `text`、`offsetMs`、`logId`、`playerId`、`seat`（数值字段为字符串）。后续二进制消息为该采样率的单声道 PCM16LE，排队播放后，字幕与头像应在排定的 AudioContext 播放时间触发，不能收到消息就提前显示。`assistant_reply_id` 标记已听过的公开记录；`assistant_done` 带 `id` 与 `streamed`，应等本机已排队音频播放完后再关闭音频上下文。`reset_audio` 要立即清空排队声音。未实时播放的请求与其他成员通过 SSE 记录读取完整 WAV/OGG 音频。
+普通询问使用实时 PCM 时，`ready` 包含 `audioFormat` 与 `sampleRate`（字符串）。客户端保留录音时已解锁的 AudioContext；`assistant_sentence` 提供 `text`、`offsetMs`、`logId`、`playerId`、`seat`（数值字段为字符串）。后续二进制消息为该采样率的单声道 PCM16LE，排队播放后，字幕与头像应在排定的 AudioContext 播放时间触发，不能收到消息就提前显示。`assistant_reply_id` 标记已听过的公开记录；`assistant_done` 带 `id` 与 `streamed`，应等本机已排队音频播放完后再关闭音频上下文。`reset_audio` 要立即清空排队声音。未实时播放的请求与其他成员通过 SSE 记录读取完整 WAV/OGG 音频。
 
 
 主持记录的 `audioCues` 为 `{offsetMs:number, text:string, logId?:string, playerId?:string, seat?:number}[]`。偏移相对于缓存的完整原声音频；整段播报按媒体 `currentTime` 切换气泡，新 AI 描述跟随对应音频首次播放才显示。普通按钮/文字动作后的待处理 AI 回合也自动调度同一个灵矽智能体。

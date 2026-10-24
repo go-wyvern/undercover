@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -166,6 +167,10 @@ func (a *App) receiveAssistant(ctx context.Context, id, uid string, upstream *li
 		}
 		return nil
 	}
+	before, err := a.rooms.View(id, uid)
+	if err != nil {
+		return err
+	}
 	startedAt := time.Now()
 	var packets [][]byte
 	var response strings.Builder
@@ -206,6 +211,19 @@ func (a *App) receiveAssistant(ctx context.Context, id, uid string, upstream *li
 			if e != nil {
 				return errors.New("assistant conversation interrupted")
 			}
+			after, err := a.rooms.View(id, uid)
+			if err != nil {
+				return err
+			}
+			if after.Version != before.Version && gameActionCall(b) {
+				// Tool results are authoritative. Do not ask the model to paraphrase
+				// them or finish every remaining AI turn before anyone can hear it.
+				if streamed {
+					_ = emit(map[string]string{"type": "reset_audio"})
+				}
+				return a.narrateAction(ctx, id, uid, upstream, before, after, output)
+			}
+			before = after
 			continue
 		}
 		var msg linx.Message
@@ -288,6 +306,61 @@ func (a *App) receiveAssistant(ctx context.Context, id, uid string, upstream *li
 		_ = emit(map[string]string{"type": "assistant_done", "text": text, "id": l.ID, "streamed": strconv.FormatBool(streamed)})
 		return nil
 	}
+}
+
+func gameActionCall(data []byte) bool {
+	var message struct {
+		Payload struct {
+			Method string
+			Params struct{ Name string }
+		}
+	}
+	if json.Unmarshal(data, &message) != nil || message.Payload.Method != "tools/call" {
+		return false
+	}
+	switch message.Payload.Params.Name {
+	case "game.start", "game.submit_description", "game.vote", "game.skip", "game.submit_ai_batch":
+		return true
+	}
+	return false
+}
+
+func (a *App) narrateAction(ctx context.Context, id, uid string, upstream *linx.Session, before, after game.View, output assistantOutput) error {
+	known := map[string]bool{}
+	if before.GameID == after.GameID {
+		for _, log := range before.Logs {
+			known[log.ID] = true
+		}
+	}
+	// Cancel the free-form follow-up. The same Linx terminal now speaks only
+	// committed public lines, so internal model commentary is never published.
+	for _, log := range after.Logs {
+		if known[log.ID] || log.Source == "linx_agent" {
+			continue
+		}
+		_, recording, err := a.rooms.Event(id, uid, log.ID)
+		if err != nil {
+			return err
+		}
+		// All listeners, including the speaker, replay the original.
+		if len(recording) > 0 {
+			continue
+		}
+		text := log.Text
+		if log.Kind == "speech" {
+			text = fmt.Sprintf("%d号：%s", log.Seat, text)
+		}
+		audio, err := upstream.SynthesizeText(ctx, text)
+		if err != nil {
+			slog.Warn("Linx committed narration failed", "room", id, "event", log.ID, "error", err)
+			break // The ordered HTTP narration queue can retry this exact public line.
+		}
+		a.cacheAudio(id+"/"+log.ID, audio)
+	}
+	if output != nil {
+		return output.WriteJSON(map[string]string{"type": "assistant_done", "streamed": "false"})
+	}
+	return nil
 }
 
 func (a *App) cacheAudio(key string, data []byte) {

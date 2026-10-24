@@ -54,17 +54,24 @@ func TestGameToolsRespectActorAndDriveAIWithoutPublicSecrets(t *testing.T) {
 	if err != nil || batch == nil {
 		t.Fatal("missing AI task")
 	}
-	actions := []game.AIAction{}
-	for _, task := range batch.Tasks {
-		actions = append(actions, game.AIAction{PlayerSeat: task.Seat, Text: "它在生活的许多场景中都有用处。"})
+
+	firstBatch := batch
+	for batch != nil {
+		actions := []game.AIAction{}
+		for _, task := range batch.Tasks {
+			actions = append(actions, game.AIAction{PlayerSeat: task.Seat, Text: "它在生活的许多场景中都有用处。"})
+		}
+		args, _ := json.Marshal(map[string]any{"batchId": batch.BatchID, "actions": actions})
+		if _, err = handler(context.Background(), "game.submit_ai_batch", args); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = handler(context.Background(), "game.submit_ai_batch", args); err == nil {
+			t.Fatal("replayed AI task executed twice")
+		}
+		batch, _ = a.rooms.NextAIBatch("room-1", "host")
 	}
-	args, _ := json.Marshal(map[string]any{"batchId": batch.BatchID, "actions": actions})
-	if _, err = handler(context.Background(), "game.submit_ai_batch", args); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = handler(context.Background(), "game.submit_ai_batch", args); err == nil {
-		t.Fatal("replayed AI task executed twice")
-	}
+	batch = firstBatch
+
 	// The host may see an AI's own task, but the public audio must not reveal its word.
 	safe, err := a.rooms.SafeHostText("room-1", "host", "它的词是"+batch.Tasks[0].Word)
 	if err != nil || strings.Contains(safe, batch.Tasks[0].Word) {

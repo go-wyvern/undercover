@@ -3,44 +3,34 @@ sequenceDiagram
     participant F as 前端 Vue 和 TypeScript
     participant G as Go 后端
     participant L as 灵矽智能体
-    Note over F,L: 已登录入座并完成发牌，当前轮到真人描述
-    Note over F,G: SSE 已保持订阅，持续接收个性化房间状态
-    F->>G: 连接 assistant/voice
-    G->>G: 验证成员身份，取得房间主持占用权
-    G->>L: OTA 鉴权后建立 WSS，发送公开上下文
-    L->>G: MCP initialize 和 tools/list
-    G-->>L: 返回绑定账号与房间的 game.* 工具
-    G-->>F: ready，允许发送语音
-    loop 按住期间
-        F->>G: 麦克风 PCM 音频
-        G->>L: 转发 PCM 音频
-    end
-    F->>G: 松开，发送 stop
+    Note over F,L: 已登录入座并完成发牌，当前轮到1号真人
+    F->>G: 按住录音，建立 assistant/voice
+    G->>L: WSS、MCP工具、公开上下文和当前主持约束
+    G-->>F: ready，发送已录制与后续PCM
+    F->>G: 松开，发送stop
     G->>L: listen.stop
-    L->>L: ASR 识别与意图理解
-    L-->>G: stt 识别文本
-    G-->>F: transcript，继续保持会话
-    L->>G: game.get_state
-    G-->>L: 去掉真人词卡的房间状态
+    L-->>G: STT识别原文
     L->>G: game.submit_description
-    G->>G: 校验描述，持久化并推进顺序
-    G-->>L: 真实执行结果与 aiBatch
-    loop 仍有可执行 AI 任务
-        L->>L: 生成这组 AI 的描述或投票
-        L->>G: game.submit_ai_batch
-        G->>G: 整批校验，原子提交并持久化
-        G-->>L: 更新后的状态与下一组任务
-        G-->>F: SSE 状态快照，待播 AI 描述暂缓展示
+    G->>G: 校验原文，保存描述与原声，推进回合
+    G-->>F: SSE：1号发言、下一位提示
+    F->>G: HTTP获取1号原声
+    G-->>F: 原声立即可用，包括发言本人
+    G->>L: 结束自由生成，用text_response合成已提交的提示
+    L-->>G: 下一位提示的TTS
+    G->>G: 校验TTS文本与公开记录一致，独立缓存
+    G-->>F: assistant_done，播放队列继续
+    Note over F,G: 前端先播完1号，再播“请2号发言”，不并行叠音
+    loop 当前轮到AI时，每次只处理一位
+        G->>L: 自动续接，提供本次AI任务
+        L->>G: game.get_ai_batch
+        G-->>L: 一位AI的词与公开发言
+        L->>G: game.submit_ai_batch：一条描述
+        G->>G: 校验、提交并推送SSE
+        G->>L: text_response：本次已提交的AI描述
+        L-->>G: 该玩家TTS
+        G->>G: 按记录ID缓存音频，结束本次会话
+        F->>G: HTTP获取该条音频，缓存未就绪则等待
+        G-->>F: 该玩家音频
+        F->>F: 顺序播放，按播放时钟显示气泡和发言
     end
-    loop 灵矽逐句返回 TTS
-        L-->>G: sentence_start 与音频包
-        G->>G: 检查公开内容，匹配座位并记录 AudioCue
-        G-->>F: assistant_sentence 与 PCM，实时模式
-        F->>F: 按播放时钟切换气泡、高亮和新描述
-    end
-    L-->>G: tts.stop
-    G->>G: 缓存完整音频，保存主持记录，释放占用权
-    G-->>F: assistant_done 与 SSE 主持记录
-    F->>F: 播完已排队音频，结束本次会话
-    Note over F,G: 其他成员和整段播放模式：SSE 取得记录 ID，HTTP 获取音频，以 currentTime 和 audioCues 同步界面
-    Note over F,L: 后续投票重复同一链路；灵矽调用 game.vote，Go 计票并决定下一轮或胜负
+    Note over F,L: 不发布模型的工具分析或整组总结；投票票齐后播报Go的真实计票结果
