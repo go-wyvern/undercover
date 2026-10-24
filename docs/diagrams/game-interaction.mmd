@@ -1,7 +1,7 @@
 sequenceDiagram
     autonumber
-    participant F as 前端 Vue 和 TypeScript
-    participant G as Go 后端
+    participant F as UnderCover 前端
+    participant G as UnderCover 服务端
     participant L as 灵矽智能体
     Note over F,L: 已登录入座并完成发牌，当前轮到1号真人
     F->>G: 按住录音，建立 assistant/voice
@@ -19,7 +19,7 @@ sequenceDiagram
     L-->>G: 下一位提示的TTS
     G->>G: 校验TTS文本与公开记录一致，独立缓存
     G-->>F: assistant_done，播放队列继续
-    Note over F,G: 前端先播完1号，再播“请2号发言”，不并行叠音
+    Note over F,G: UnderCover 前端先播完1号，再播“请2号发言”，不并行叠音
     loop 当前轮到AI时，每次只处理一位
         G->>L: 自动续接，提供本次AI任务
         L->>G: game.get_ai_batch
@@ -33,4 +33,4 @@ sequenceDiagram
         G-->>F: 该玩家音频
         F->>F: 顺序播放，按播放时钟显示气泡和发言
     end
-    Note over F,L: 不发布模型的工具分析或整组总结；投票票齐后播报Go的真实计票结果
+    Note over F,L: 不发布模型的工具分析或整组总结；投票票齐后播报 UnderCover 服务端的真实计票结果

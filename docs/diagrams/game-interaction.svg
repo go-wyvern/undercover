@@ -1,19 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1360" height="2200" viewBox="0 0 1360 2200" role="img" aria-labelledby="title desc">
 <title id="title">谁是卧底游戏交互泳道图</title>
-<desc id="desc">前端、Go 后端、灵矽三个泳道，展示语音输入、MCP 工具推进规则、AI 接续以及音频与头像气泡同步的流程。</desc>
+<desc id="desc">UnderCover 前端、UnderCover 服务端、灵矽三个泳道，展示语音输入、MCP 工具推进规则、AI 接续以及音频与头像气泡同步的流程。</desc>
 <rect width="100%" height="100%" fill="white"/>
 <text x="40" y="57.16" fill="#172B40" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="32" font-weight="600" text-anchor="start">谁是卧底游戏交互泳道图</text>
-<text x="40" y="97.72" fill="#65748A" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="19" font-weight="400" text-anchor="start">一次真人描述 → 灵矽扮演 AI 接续 → 前端同步播放与显示</text>
+<text x="40" y="97.72" fill="#65748A" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="19" font-weight="400" text-anchor="start">一次真人描述 → 灵矽扮演 AI 接续 → UnderCover 前端同步播放与显示</text>
 <rect x="40" y="121" width="1280" height="38" rx="7" fill="#F5F7FA"/>
 <text x="56" y="147.08" fill="#506176" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="start">前置条件：已登录、已入座、已发牌并订阅 SSE，轮到真人发言。时间由上向下推进。</text>
 <rect x="40" y="180" width="400" height="1850" rx="12" fill="#F4FAF7"/>
 <rect x="40" y="180" width="400" height="70" rx="12" fill="#247A68"/>
-<text x="240" y="215.12" fill="#FFFFFF" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="24" font-weight="600" text-anchor="middle">前端</text>
+<text x="240" y="215.12" fill="#FFFFFF" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="24" font-weight="600" text-anchor="middle">UnderCover 前端</text>
 <text x="240" y="239.44" fill="#FFFFFF" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="13" font-weight="400" text-anchor="middle">Vue / TypeScript · 采集与呈现</text>
 <line x1="240" y1="260" x2="240" y2="2015" stroke="#BAC6D3" stroke-width="1" stroke-dasharray="5 5"/>
 <rect x="480" y="180" width="400" height="1850" rx="12" fill="#F4F7FD"/>
 <rect x="480" y="180" width="400" height="70" rx="12" fill="#4266B0"/>
-<text x="680" y="215.12" fill="#FFFFFF" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="24" font-weight="600" text-anchor="middle">Go 后端</text>
+<text x="680" y="215.12" fill="#FFFFFF" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="24" font-weight="600" text-anchor="middle">UnderCover 服务端</text>
 <text x="680" y="239.44" fill="#FFFFFF" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="13" font-weight="400" text-anchor="middle">房间 · 规则 · MCP 工具 · 语音桥接</text>
 <line x1="680" y1="260" x2="680" y2="2015" stroke="#BAC6D3" stroke-width="1" stroke-dasharray="5 5"/>
 <rect x="920" y="180" width="400" height="1850" rx="12" fill="#FAF5FC"/>
@@ -74,7 +74,7 @@
 <rect x="356.75" y="786" width="206.5" height="24" rx="5" fill="#FFFFFF"/>
 <text x="460.0" y="805.08" fill="#247A68" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">transcript，继续保持会话</text>
 <rect x="40" y="854" width="1280" height="34" rx="5" fill="#EDF2F6"/>
-<text x="58" y="876.96" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="600" text-anchor="start">03  调用 Go 工具推进真实游戏状态</text>
+<text x="58" y="876.96" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="600" text-anchor="start">03  调用 UnderCover 服务端工具推进真实游戏状态</text>
 <line x1="1120" y1="920" x2="680" y2="920" stroke="#8A58A3" stroke-width="2"/>
 <polygon points="680,920 690,915 690,925" fill="#8A58A3"/>
 <rect x="830.75" y="890" width="138.5" height="24" rx="5" fill="#FFFFFF"/>
@@ -145,6 +145,6 @@
 <text x="680" y="1991.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">释放主持占用权，恢复回合计时</text>
 <rect x="40" y="2052" width="1280" height="120" rx="10" fill="#F2F5F8"/>
 <text x="58" y="2084.08" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="start">整段播放：其他成员、自动主持与重听，通过 HTTP 获取音频，以 currentTime 和 audioCues 同步界面。</text>
-<text x="58" y="2117.08" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="start">投票结算：重复语音工具链路，灵矽调用 game.vote，Go 负责计票、淘汰和胜负判断。</text>
-<text x="58" y="2150.08" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="start">按钮文字：HTTP 直接执行规则，有待处理 AI 时，Go 用缓存的“继续主持”语音触发灵矽接续。</text>
+<text x="58" y="2117.08" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="start">投票结算：重复语音工具链路，灵矽调用 game.vote，UnderCover 服务端负责计票、淘汰和胜负判断。</text>
+<text x="58" y="2150.08" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="start">按钮文字：HTTP 直接执行规则，有待处理 AI 时，UnderCover 服务端用缓存的“继续主持”语音触发灵矽接续。</text>
 </svg>
