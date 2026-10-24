@@ -8,7 +8,7 @@ Go 后端 + Vue 3 / TypeScript 前端的「谁是卧底」应用。浏览器展�
 
 ## 本地运行
 
-需要 Go 1.24+、Node.js 22.12+、PostgreSQL 和 Redis。先创建本应用的独立 PostgreSQL 数据库，复制 `.env.example` 为 `.env`，填写 `DATABASE_URL` 和 `REDIS_URL`。应用启动时检查连接并自动创建 `undercover_rooms` 表；数据库账号需要建表及读写权限。新数据库的大厅为空，通过页面创建第一间房间。
+需要 Go 1.24+、Node.js 22.12+、PostgreSQL 和 Redis。先创建本应用的独立 PostgreSQL 数据库，复制 `.env.example` 为 `.env`，填写 `DATABASE_URL`，以及单实例 `REDIS_URL` 或 Cluster `REDIS_ADDR`。应用启动时检查连接并自动创建 `undercover_rooms` 表；数据库账号需要建表及读写权限。新数据库的大厅为空，通过页面创建第一间房间。
 
 ```sh
 npm --prefix web ci
@@ -111,7 +111,7 @@ go build -o bin/undercover ./cmd/undercover
 
 `DATABASE_URL` 指向 PostgreSQL，Go 通过 `database/sql` 与 `github.com/lib/pq` 访问。`undercover_rooms` 每间房间一行，`state` JSONB 保存座位、隐藏词、完整对局及公开记录，`updated_at` 记录更新时间。状态写入成功后再通知前端；写入失败会回滚内存中的变更。关闭房间执行真正的 `DELETE`，不会在重启后自动重建。
 
-`REDIS_URL` 指向会话存储。Redis 的持久化、备份及访问控制由部署环境配置；若清空会话库，玩家需要重新登录。PostgreSQL 与 Redis 的连接信息只保留在 Go 服务端。应用运行及设备激活均不需要 `data` 目录，原来的 `UNDERCOVER_DATA_DIR`、`-data-dir` 已移除。
+`REDIS_URL` 指向单实例会话存储；Redis Cluster 与 spxbench 一样填写逗号分隔的 `REDIS_ADDR`（非空时优先，固定 DB 0），认证可填 `REDIS_USERNAME` / `REDIS_PASSWORD`，无认证则留空。Redis 的持久化、备份及访问控制由部署环境配置；若清空会话库，玩家需要重新登录。PostgreSQL 与 Redis 的连接信息只保留在 Go 服务端。应用运行及设备激活均不需要 `data` 目录，原来的 `UNDERCOVER_DATA_DIR`、`-data-dir` 已移除。
 
 订阅、游戏计时器及音频缓存仍属于单个 Go 实例。当前请部署一个 Go 副本；应用通过 PostgreSQL advisory lock 阻止同一数据库 schema 同时启动第二个游戏进程。所有玩家访问同一个服务地址，即可看到并加入同一组房间。原始录音仅存内存，重启后不恢复；已保存的文字对局、词卡和有效 Redis 登录会话可以恢复。
 
@@ -164,7 +164,7 @@ web/dist/            构建产物，由 go:embed 嵌入
 2. 进入 **Actions → Publish undercover image → Run workflow**，选择 `main`。
 3. 工作流先构建前端并运行测试，包括真实 PostgreSQL/Redis 集成测试，成功后构建并推送镜像。
 
-`validate.services` 中的 PostgreSQL 和 Redis 只在 GitHub Actions 测试任务中临时运行，任务结束后销毁，不会打进应用镜像，也不会部署到服务器。线上应用始终通过 `DATABASE_URL` / `REDIS_URL` 连接外部服务。
+`validate.services` 中的 PostgreSQL 和 Redis 只在 GitHub Actions 测试任务中临时运行，任务结束后销毁，不会打进应用镜像，也不会部署到服务器。线上应用始终通过 `DATABASE_URL` 和 `REDIS_URL` / `REDIS_ADDR` 连接外部服务。
 
 镜像地址为 `ghcr.io/go-wyvern/undercover:main`，另保留 `sha-<提交前七位>` 标签，支持 `linux/amd64` 与 `linux/arm64`。发布使用仓库自动提供的 `GITHUB_TOKEN` 和 `packages: write`，无需添加个人 GHCR Token。灵矽、XBuilder、数据库和 Redis 的配置均在运行时注入，不进入镜像或 Actions 构建配置。
 
@@ -201,7 +201,7 @@ kubectl -n builder rollout status deployment/undercover
 
 也可以直接在 KubeSphere 创建 `undercover-config`，添加名为 `.env` 的键，将配置模板 `data[".env"]` 下面的环境变量内容填入；再应用 `deploy/undercover.yaml`。
 
-`DATABASE_URL` 和 `REDIS_URL` 必须填写 Pod 能访问的外部地址，不使用 `127.0.0.1`。PostgreSQL 数据库需提前创建，应用会自动建表；连接 URL 中账号或密码的特殊字符需做 URL 编码。数据库连接、会话和对局均不依赖容器本地目录。
+`DATABASE_URL` 和 `REDIS_URL` / `REDIS_ADDR` 必须填写 Pod 能访问的外部地址，不使用 `127.0.0.1`。PostgreSQL 数据库需提前创建，应用会自动建表；连接 URL 中账号或密码的特殊字符需做 URL 编码。数据库连接、会话和对局均不依赖容器本地目录。
 
 Service 名为 `undercover`，服务端口 `80`，转发到应用 `18080`。将现有 HTTPS Ingress / 网关转发到此 Service，并开启 WebSocket、关闭 SSE 缓冲；XBuilder 登记的回调地址使用同一个公开域名。
 
@@ -216,3 +216,37 @@ kubectl -n builder rollout status deployment/undercover
 ```
 
 以上命令由部署人员在目标集群执行；GitHub Actions 只负责验证和推送镜像，不连接线上 PostgreSQL / Redis，也不自动操作集群。
+
+## 在现有 PostgreSQL 上创建独立账号和数据库
+
+使用数据库管理员账号连接现有 PostgreSQL 实例，例如：
+
+```sh
+psql -h YOUR_PG_HOST -p 5432 -U YOUR_ADMIN_USER -d postgres -W
+```
+
+在 `psql` 中逐条执行（示例密码为 `change-me`；`CREATE DATABASE` 不要放在事务中）：
+
+```sql
+CREATE ROLE undercover WITH LOGIN PASSWORD 'change-me';
+CREATE DATABASE undercover OWNER undercover;
+\connect undercover
+GRANT USAGE, CREATE ON SCHEMA public TO undercover;
+```
+
+管理员需要创建角色、创建数据库及指定数据库所有者的权限；普通应用账号未必具备这些权限。应用账号只需连接自己的数据库并建表、读写数据，不需要授予超级用户权限。Go 启动时自动创建 `undercover_rooms`，不会修改 spxbench 的数据库。
+
+ConfigMap 的 `.env` 配置示例：
+
+```dotenv
+DATABASE_URL="postgresql://undercover:change-me@YOUR_PG_HOST:5432/undercover?sslmode=disable&TimeZone=UTC&search_path=public"
+# Redis Cluster：填写可从应用 Pod 访问的种子节点，自动发现其余节点并处理 MOVED 重定向。
+REDIS_URL=
+REDIS_ADDR=redis8.builder.svc.cluster.local:6379,redis8.builder.svc.cluster.local:6380,redis8.builder.svc.cluster.local:6381
+REDIS_USERNAME=
+REDIS_PASSWORD=
+```
+
+`sslmode` 按现有 PostgreSQL 服务配置填写。Redis 没有启用认证时，上面的用户名、密码留空；PostgreSQL 新建的账号不会同步创建 Redis 用户。如需独立 Redis ACL 用户，需由 Redis 管理员在每个 Cluster 节点配置并持久化 ACL；本应用会话键前缀为 `undercover:session:*`，需要 GET / SET / DEL、连接握手及 Cluster 拓扑查询权限。Cluster 公布的节点地址也必须对应用 Pod 可达。
+
+PostgreSQL 操作参考官方 [CREATE ROLE](https://www.postgresql.org/docs/17/sql-createrole.html)、[CREATE DATABASE](https://www.postgresql.org/docs/17/sql-createdatabase.html)；Redis 用户管理参考 [ACL 文档](https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/)。

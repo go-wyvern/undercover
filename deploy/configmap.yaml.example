@@ -15,6 +15,12 @@ data:
     DATABASE_URL="postgresql://undercover:change-me@postgres.example.internal:5432/undercover?sslmode=require"
     # 外部 Redis：替换域名、账号、密码和 DB 编号；TLS 使用 rediss://。
     REDIS_URL="redis://default:change-me@redis.example.internal:6379/0"
+    # Redis Cluster：填写逗号分隔的节点地址，非空时忽略上面的 REDIS_URL。
+    # 例如 redis8.builder.svc.cluster.local:6379,redis8.builder.svc.cluster.local:6380,redis8.builder.svc.cluster.local:6381。
+    REDIS_ADDR=
+    # Redis 用户与 PostgreSQL 用户独立；未启用 Redis 认证时留空。
+    REDIS_USERNAME=
+    REDIS_PASSWORD=
 
     XBUILDER_ACCOUNT_BASE_URL=https://account.example.com
     XBUILDER_ACCOUNT_CLIENT_ID=replace-with-your-client-id

@@ -64,10 +64,45 @@ jobs:
           npm --prefix web run build
           npm --prefix web test
 
+      # Temporary, isolated Cluster used only to verify routing and ACL authentication.
+      - name: Start test Redis Cluster
+        run: |
+          set -euo pipefail
+          for port in 7000 7001 7002; do
+            docker run -d --name "redis-cluster-$port" --network host redis:7-alpine \
+              redis-server --bind 127.0.0.1 --port "$port" \
+              --cluster-enabled yes --cluster-announce-ip 127.0.0.1 \
+              --cluster-config-file /data/nodes.conf \
+              --appendonly no --save ""
+          done
+          for port in 7000 7001 7002; do
+            for attempt in $(seq 1 30); do
+              if docker exec "redis-cluster-$port" redis-cli -p "$port" ping; then break; fi
+              sleep 1
+            done
+            docker exec "redis-cluster-$port" redis-cli -p "$port" ping
+          done
+          docker exec redis-cluster-7000 redis-cli --cluster create \
+            127.0.0.1:7000 127.0.0.1:7001 127.0.0.1:7002 \
+            --cluster-replicas 0 --cluster-yes
+          for port in 7000 7001 7002; do
+            docker exec "redis-cluster-$port" redis-cli -p "$port" ACL SETUSER \
+              undercover on '>cluster-test-password' '~undercover:test:*' \
+              +ping +hello +get +set +del +ttl '+cluster|slots' '+client|setinfo'
+            for attempt in $(seq 1 30); do
+              if docker exec "redis-cluster-$port" redis-cli -p "$port" cluster info | grep -q 'cluster_state:ok'; then break; fi
+              sleep 1
+            done
+            docker exec "redis-cluster-$port" redis-cli -p "$port" cluster info | grep -q 'cluster_state:ok'
+          done
+
       - name: Test Go with PostgreSQL and Redis
         env:
           UNDERCOVER_TEST_DATABASE_URL: postgresql://undercover:undercover@127.0.0.1:5432/undercover?sslmode=disable
           UNDERCOVER_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+          UNDERCOVER_TEST_REDIS_ADDR: 127.0.0.1:7000,127.0.0.1:7001,127.0.0.1:7002
+          UNDERCOVER_TEST_REDIS_USERNAME: undercover
+          UNDERCOVER_TEST_REDIS_PASSWORD: cluster-test-password
         run: |
           go vet ./...
           go test -race ./...

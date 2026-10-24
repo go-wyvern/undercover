@@ -58,7 +58,10 @@ func main() {
 		fatal(err)
 	}
 	defer rooms.Close()
-	sessions, err := storage.OpenRedis(setup, os.Getenv("REDIS_URL"))
+	sessions, err := storage.OpenRedis(setup, storage.RedisConfig{
+		URL: os.Getenv("REDIS_URL"), Addr: os.Getenv("REDIS_ADDR"),
+		Username: os.Getenv("REDIS_USERNAME"), Password: os.Getenv("REDIS_PASSWORD"),
+	})
 	if err != nil {
 		fatal(err)
 	}

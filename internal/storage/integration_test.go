@@ -119,14 +119,30 @@ func TestRedisSessionTTLSharingAndRevocation(t *testing.T) {
 	if raw == "" {
 		t.Skip("set UNDERCOVER_TEST_REDIS_URL for real Redis integration")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	testRedisSessionStore(t, RedisConfig{URL: raw})
+}
+
+func TestRedisClusterSessionRoutingAndAuthentication(t *testing.T) {
+	addrs := os.Getenv("UNDERCOVER_TEST_REDIS_ADDR")
+	if addrs == "" {
+		t.Skip("set UNDERCOVER_TEST_REDIS_ADDR for real Redis Cluster integration")
+	}
+	testRedisSessionStore(t, RedisConfig{
+		Addr: addrs, Username: os.Getenv("UNDERCOVER_TEST_REDIS_USERNAME"),
+		Password: os.Getenv("UNDERCOVER_TEST_REDIS_PASSWORD"),
+	})
+}
+
+func testRedisSessionStore(t *testing.T, cfg RedisConfig) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	first, err := OpenRedis(ctx, raw)
+	first, err := OpenRedis(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	second, err := OpenRedis(ctx, raw)
+	second, err := OpenRedis(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,5 +176,20 @@ func TestRedisSessionTTLSharingAndRevocation(t *testing.T) {
 	time.Sleep(60 * time.Millisecond)
 	if _, err = second.Get(ctx, key); err != ErrNotFound {
 		t.Fatal("expired session remained usable")
+	}
+
+	// Different session hashes exercise slots on all three Cluster primaries.
+	for i := 1; i <= 24; i++ {
+		key := fmt.Sprintf("%064x", i)
+		if err = first.Set(ctx, key, value, time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		found, err := second.Get(ctx, key)
+		if err != nil || string(found) != string(value) {
+			t.Fatalf("cross-slot session %d: %v", i, err)
+		}
+		if err = second.Delete(ctx, key); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
