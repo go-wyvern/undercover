@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 44" fill="none" role="img" aria-labelledby="logo-title">
+  <title id="logo-title">UnderCover ｜ 卧底俱乐部</title>
+  <!-- Same mascot, crop and background as the homepage brand mark. -->
+  <defs>
+    <clipPath id="brand-clip"><rect width="44" height="44" rx="14" /></clipPath>
+  </defs>
+  <g clip-path="url(#brand-clip)">
+    <rect width="44" height="44" fill="#1f4539" />
+    <svg x="-4.4" y="-3.4" width="52.8" height="52.8" viewBox="0 0 180 180" fill="none">
+<defs>
+      <linearGradient
+        id="robot-body"
+        x1="60"
+        y1="58"
+        x2="126"
+        y2="146"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop stop-color="#fffef5" />
+        <stop offset="1" stop-color="#cee4d3" />
+      </linearGradient>
+      <linearGradient
+        id="robot-glass"
+        x1="61"
+        y1="57"
+        x2="130"
+        y2="98"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop stop-color="#123d37" />
+        <stop offset="1" stop-color="#0c2422" />
+      </linearGradient>
+      <filter id="robot-shadow" x="15" y="20" width="160" height="160">
+        <feGaussianBlur stdDeviation="6" />
+      </filter>
+    </defs>
+    <ellipse
+      cx="90"
+      cy="159"
+      rx="40"
+      ry="8"
+      fill="#061e18"
+      opacity=".2"
+      filter="url(#robot-shadow)"
+    />
+    <g class="robot-float">
+      <path d="M90 38V25" stroke="#d5e7cd" stroke-width="5" stroke-linecap="round" />
+      <circle cx="90" cy="21" r="7" fill="#f8ab86" />
+      <path
+        d="M55 106C45 107 36 115 31 126"
+        stroke="#dae9d8"
+        stroke-width="12"
+        stroke-linecap="round"
+      />
+      <path
+        d="M127 106C139 104 146 98 151 88"
+        stroke="#dae9d8"
+        stroke-width="12"
+        stroke-linecap="round"
+      />
+      <g transform="rotate(17 151 81)">
+        <rect x="137" y="62" width="25" height="34" rx="4" fill="#fff9e9" />
+        <rect x="140" y="65" width="19" height="28" rx="2" stroke="#b4c9ad" />
+        <path d="m149 72-4 7 4 7 4-7-4-7Z" fill="#f2a583" />
+      </g>
+      <path
+        d="M63 103H117L124 132C126 143 116 151 90 151C64 151 54 143 56 132L63 103Z"
+        fill="url(#robot-body)"
+      />
+      <path d="M77 151V157M104 151V157" stroke="#c5dcc8" stroke-width="11" stroke-linecap="round" />
+      <rect x="43" y="42" width="94" height="72" rx="29" fill="url(#robot-body)" />
+      <rect x="50" y="50" width="80" height="49" rx="21" fill="url(#robot-glass)" />
+      <path
+        d="M57 59C72 51 100 51 115 56"
+        stroke="#4d6e61"
+        stroke-width="3"
+        stroke-linecap="round"
+        opacity=".5"
+      />
+      <g class="robot-eyes">
+        <rect x="66" y="67" width="10" height="17" rx="5" fill="#b7ed99" />
+        <rect x="104" y="67" width="10" height="17" rx="5" fill="#b7ed99" />
+      </g>
+      <path
+        d="M84 87C88 90 92 90 96 87"
+        stroke="#a6db91"
+        stroke-width="2.8"
+        stroke-linecap="round"
+      />
+      <rect x="36" y="65" width="8" height="23" rx="4" fill="#b4d1bc" />
+      <rect x="136" y="65" width="8" height="23" rx="4" fill="#b4d1bc" />
+      <circle cx="90" cy="127" r="8" fill="#a8c5a9" />
+      <path d="m88 122-3 6h4l-1 5 7-8h-5l2-3h-4Z" fill="#f8fff1" />
+    </g>
+    </svg>
+  </g>
+</svg>
