@@ -1,0 +1,14 @@
+# Credentials and local state never enter the build context.
+.git
+.github
+.env
+.env.*
+**/.env
+**/.env.*
+/data/
+/bin/
+/docs/
+web/node_modules/
+web/dist/
+*.log
+.DS_Store

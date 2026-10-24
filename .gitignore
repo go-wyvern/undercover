@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+/data/
+/bin/
+web/node_modules/
+*.log
+.DS_Store

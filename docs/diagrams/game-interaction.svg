@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1360" height="2200" viewBox="0 0 1360 2200" role="img" aria-labelledby="title desc">
+<title id="title">谁是卧底游戏交互泳道图</title>
+<desc id="desc">前端、Go 后端、灵矽三个泳道，展示语音输入、MCP 工具推进规则、AI 接续以及音频与头像气泡同步的流程。</desc>
+<rect width="100%" height="100%" fill="white"/>
+<text x="40" y="57.16" fill="#172B40" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="32" font-weight="600" text-anchor="start">谁是卧底游戏交互泳道图</text>
+<text x="40" y="97.72" fill="#65748A" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="19" font-weight="400" text-anchor="start">一次真人描述 → 灵矽扮演 AI 接续 → 前端同步播放与显示</text>
+<rect x="40" y="121" width="1280" height="38" rx="7" fill="#F5F7FA"/>
+<text x="56" y="147.08" fill="#506176" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="start">前置条件：已登录、已入座、已发牌并订阅 SSE，轮到真人发言。时间由上向下推进。</text>
+<rect x="40" y="180" width="400" height="1850" rx="12" fill="#F4FAF7"/>
+<rect x="40" y="180" width="400" height="70" rx="12" fill="#247A68"/>
+<text x="240" y="215.12" fill="#FFFFFF" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="24" font-weight="600" text-anchor="middle">前端</text>
+<text x="240" y="239.44" fill="#FFFFFF" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="13" font-weight="400" text-anchor="middle">Vue / TypeScript · 采集与呈现</text>
+<line x1="240" y1="260" x2="240" y2="2015" stroke="#BAC6D3" stroke-width="1" stroke-dasharray="5 5"/>
+<rect x="480" y="180" width="400" height="1850" rx="12" fill="#F4F7FD"/>
+<rect x="480" y="180" width="400" height="70" rx="12" fill="#4266B0"/>
+<text x="680" y="215.12" fill="#FFFFFF" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="24" font-weight="600" text-anchor="middle">Go 后端</text>
+<text x="680" y="239.44" fill="#FFFFFF" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="13" font-weight="400" text-anchor="middle">房间 · 规则 · MCP 工具 · 语音桥接</text>
+<line x1="680" y1="260" x2="680" y2="2015" stroke="#BAC6D3" stroke-width="1" stroke-dasharray="5 5"/>
+<rect x="920" y="180" width="400" height="1850" rx="12" fill="#FAF5FC"/>
+<rect x="920" y="180" width="400" height="70" rx="12" fill="#8A58A3"/>
+<text x="1120" y="215.12" fill="#FFFFFF" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="24" font-weight="600" text-anchor="middle">灵矽</text>
+<text x="1120" y="239.44" fill="#FFFFFF" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="13" font-weight="400" text-anchor="middle">ASR · 意图理解 · AI 玩家 · TTS</text>
+<line x1="1120" y1="260" x2="1120" y2="2015" stroke="#BAC6D3" stroke-width="1" stroke-dasharray="5 5"/>
+<rect x="40" y="262" width="1280" height="34" rx="5" fill="#EDF2F6"/>
+<text x="58" y="284.96" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="600" text-anchor="start">01  建立语音会话并发现工具</text>
+<line x1="240" y1="331" x2="680" y2="331" stroke="#247A68" stroke-width="2"/>
+<polygon points="680,331 670,326 670,336" fill="#247A68"/>
+<rect x="373.5" y="301" width="173.0" height="24" rx="5" fill="#FFFFFF"/>
+<text x="460.0" y="320.08" fill="#247A68" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">连接 assistant/voice</text>
+<rect x="523" y="350" width="314" height="44" rx="10" fill="#FFFFFF" stroke="#D9E1EA"/>
+<text x="680" y="374.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">校验成员身份，取得房间主持占用权</text>
+<line x1="680" y1="427" x2="1120" y2="427" stroke="#4266B0" stroke-width="2"/>
+<polygon points="1120,427 1110,422 1110,432" fill="#4266B0"/>
+<rect x="778.75" y="397" width="242.5" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="416.08" fill="#4266B0" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">OTA 鉴权 / WSS / 公开上下文</text>
+<line x1="1120" y1="486" x2="680" y2="486" stroke="#8A58A3" stroke-width="2"/>
+<polygon points="680,486 690,481 690,491" fill="#8A58A3"/>
+<rect x="795.75" y="456" width="208.5" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="475.08" fill="#8A58A3" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">MCP initialize / tools/list</text>
+<line x1="680" y1="545" x2="1120" y2="545" stroke="#8A58A3" stroke-width="2" stroke-dasharray="5 5"/>
+<polygon points="1120,545 1110,540 1110,550" fill="#8A58A3"/>
+<rect x="763.75" y="515" width="272.5" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="534.08" fill="#8A58A3" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">返回绑定房间与账号的 game.* 工具</text>
+<line x1="680" y1="545" x2="240" y2="545" stroke="#247A68" stroke-width="2" stroke-dasharray="5 5"/>
+<polygon points="240,545 250,540 250,550" fill="#247A68"/>
+<rect x="389.5" y="515" width="141.0" height="24" rx="5" fill="#FFFFFF"/>
+<text x="460.0" y="534.08" fill="#247A68" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">ready，开始录音</text>
+<rect x="40" y="579" width="1280" height="34" rx="5" fill="#EDF2F6"/>
+<text x="58" y="601.96" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="600" text-anchor="start">02  上传语音并识别玩家意图</text>
+<line x1="240" y1="642" x2="680" y2="642" stroke="#247A68" stroke-width="2"/>
+<polygon points="680,642 670,637 670,647" fill="#247A68"/>
+<rect x="362.0" y="612" width="196.0" height="24" rx="5" fill="#FFFFFF"/>
+<text x="460.0" y="631.08" fill="#247A68" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">按住期间发送 PCM16LE</text>
+<line x1="680" y1="642" x2="1120" y2="642" stroke="#4266B0" stroke-width="2"/>
+<polygon points="1120,642 1110,637 1110,647" fill="#4266B0"/>
+<rect x="785.25" y="612" width="229.5" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="631.08" fill="#4266B0" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">转发音频 · 16 kHz / 单声道</text>
+<line x1="240" y1="706" x2="680" y2="706" stroke="#247A68" stroke-width="2"/>
+<polygon points="680,706 670,701 670,711" fill="#247A68"/>
+<rect x="391.5" y="676" width="137.0" height="24" rx="5" fill="#FFFFFF"/>
+<text x="460.0" y="695.08" fill="#247A68" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">松开，发送 stop</text>
+<line x1="680" y1="706" x2="1120" y2="706" stroke="#4266B0" stroke-width="2"/>
+<polygon points="1120,706 1110,701 1110,711" fill="#4266B0"/>
+<rect x="851.25" y="676" width="97.5" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="695.08" fill="#4266B0" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">listen.stop</text>
+<rect x="963" y="726" width="314" height="44" rx="10" fill="#FFFFFF" stroke="#D9E1EA"/>
+<text x="1120" y="750.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">ASR 识别与意图理解</text>
+<line x1="1120" y1="816" x2="680" y2="816" stroke="#4266B0" stroke-width="2" stroke-dasharray="5 5"/>
+<polygon points="680,816 690,811 690,821" fill="#4266B0"/>
+<rect x="846.5" y="786" width="107.0" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="805.08" fill="#4266B0" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">stt 识别文本</text>
+<line x1="680" y1="816" x2="240" y2="816" stroke="#247A68" stroke-width="2" stroke-dasharray="5 5"/>
+<polygon points="240,816 250,811 250,821" fill="#247A68"/>
+<rect x="356.75" y="786" width="206.5" height="24" rx="5" fill="#FFFFFF"/>
+<text x="460.0" y="805.08" fill="#247A68" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">transcript，继续保持会话</text>
+<rect x="40" y="854" width="1280" height="34" rx="5" fill="#EDF2F6"/>
+<text x="58" y="876.96" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="600" text-anchor="start">03  调用 Go 工具推进真实游戏状态</text>
+<line x1="1120" y1="920" x2="680" y2="920" stroke="#8A58A3" stroke-width="2"/>
+<polygon points="680,920 690,915 690,925" fill="#8A58A3"/>
+<rect x="830.75" y="890" width="138.5" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="909.08" fill="#8A58A3" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">game.get_state</text>
+<line x1="680" y1="979" x2="1120" y2="979" stroke="#8A58A3" stroke-width="2" stroke-dasharray="5 5"/>
+<polygon points="1120,979 1110,974 1110,984" fill="#8A58A3"/>
+<rect x="788.0" y="949" width="224.0" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="968.08" fill="#8A58A3" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">公开房间状态，不含真人词卡</text>
+<line x1="1120" y1="1044" x2="680" y2="1044" stroke="#8A58A3" stroke-width="2"/>
+<polygon points="680,1044 690,1039 690,1049" fill="#8A58A3"/>
+<rect x="791.75" y="1014" width="216.5" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="1033.08" fill="#8A58A3" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">game.submit_description</text>
+<rect x="523" y="1065" width="314" height="44" rx="10" fill="#FFFFFF" stroke="#D9E1EA"/>
+<text x="680" y="1089.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">校验描述，保存并推进发言顺序</text>
+<line x1="680" y1="1150" x2="1120" y2="1150" stroke="#8A58A3" stroke-width="2" stroke-dasharray="5 5"/>
+<polygon points="1120,1150 1110,1145 1110,1155" fill="#8A58A3"/>
+<rect x="819.5" y="1120" width="161.0" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="1139.08" fill="#8A58A3" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">执行结果 + aiBatch</text>
+<rect x="963" y="1171" width="314" height="44" rx="10" fill="#FFFFFF" stroke="#D9E1EA"/>
+<text x="1120" y="1195.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">生成待行动 AI 的描述或投票</text>
+<line x1="1120" y1="1258" x2="680" y2="1258" stroke="#8A58A3" stroke-width="2"/>
+<polygon points="680,1258 690,1253 690,1263" fill="#8A58A3"/>
+<rect x="803.5" y="1228" width="193.0" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="1247.08" fill="#8A58A3" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">game.submit_ai_batch</text>
+<rect x="523" y="1279" width="314" height="70" rx="10" fill="#FFFFFF" stroke="#D9E1EA"/>
+<text x="680" y="1303.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">校验座位、任务组与合法动作</text>
+<text x="680" y="1329.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">整批通过后提交并持久化</text>
+<line x1="680" y1="1403" x2="1120" y2="1403" stroke="#8A58A3" stroke-width="2" stroke-dasharray="5 5"/>
+<polygon points="1120,1403 1110,1398 1110,1408" fill="#8A58A3"/>
+<rect x="769.25" y="1373" width="261.5" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="1392.08" fill="#8A58A3" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">结果 + 下一组任务，直至任务为空</text>
+<line x1="680" y1="1403" x2="240" y2="1403" stroke="#247A68" stroke-width="2" stroke-dasharray="5 5"/>
+<polygon points="240,1403 250,1398 250,1408" fill="#247A68"/>
+<rect x="372.25" y="1373" width="175.5" height="24" rx="5" fill="#FFFFFF"/>
+<text x="460.0" y="1392.08" fill="#247A68" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">SSE：个性化房间快照</text>
+<rect x="83" y="1423" width="314" height="44" rx="10" fill="#FFFFFF" stroke="#D9E1EA"/>
+<text x="240" y="1447.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">新 AI 描述等待对应音频开始再展示</text>
+<rect x="40" y="1492" width="1280" height="34" rx="5" fill="#EDF2F6"/>
+<text x="58" y="1514.96" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="600" text-anchor="start">04  返回语音并按播放进度显示气泡</text>
+<line x1="1120" y1="1554" x2="680" y2="1554" stroke="#4266B0" stroke-width="2" stroke-dasharray="5 5"/>
+<polygon points="680,1554 690,1549 690,1559" fill="#4266B0"/>
+<rect x="814.75" y="1524" width="170.5" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="1543.08" fill="#4266B0" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">逐句文字 + TTS 音频</text>
+<rect x="523" y="1575" width="314" height="44" rx="10" fill="#FFFFFF" stroke="#D9E1EA"/>
+<text x="680" y="1599.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">检查公开内容，匹配座位与 AudioCue</text>
+<line x1="680" y1="1662" x2="240" y2="1662" stroke="#247A68" stroke-width="2" stroke-dasharray="5 5"/>
+<polygon points="240,1662 250,1657 250,1667" fill="#247A68"/>
+<rect x="306.75" y="1632" width="306.5" height="24" rx="5" fill="#FFFFFF"/>
+<text x="460.0" y="1651.08" fill="#247A68" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">assistant_sentence + PCM，实时模式</text>
+<rect x="83" y="1683" width="314" height="70" rx="10" fill="#FFFFFF" stroke="#D9E1EA"/>
+<text x="240" y="1707.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">按实际音频播放时钟</text>
+<text x="240" y="1733.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">切换头像气泡、波形和描述记录</text>
+<rect x="40" y="1781" width="1280" height="34" rx="5" fill="#EDF2F6"/>
+<text x="58" y="1803.96" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="600" text-anchor="start">05  保存播报并结束本次交互</text>
+<line x1="1120" y1="1843" x2="680" y2="1843" stroke="#4266B0" stroke-width="2" stroke-dasharray="5 5"/>
+<polygon points="680,1843 690,1838 690,1848" fill="#4266B0"/>
+<rect x="861.5" y="1813" width="77.0" height="24" rx="5" fill="#FFFFFF"/>
+<text x="900.0" y="1832.08" fill="#4266B0" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">tts.stop</text>
+<rect x="523" y="1864" width="314" height="44" rx="10" fill="#FFFFFF" stroke="#D9E1EA"/>
+<text x="680" y="1888.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">缓存完整音频，保存公开主持记录</text>
+<line x1="680" y1="1947" x2="240" y2="1947" stroke="#247A68" stroke-width="2" stroke-dasharray="5 5"/>
+<polygon points="240,1947 250,1942 250,1952" fill="#247A68"/>
+<rect x="331.5" y="1917" width="257.0" height="24" rx="5" fill="#FFFFFF"/>
+<text x="460.0" y="1936.08" fill="#247A68" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="middle">assistant_done + SSE 主持记录</text>
+<rect x="83" y="1967" width="314" height="44" rx="10" fill="#FFFFFF" stroke="#D9E1EA"/>
+<text x="240" y="1991.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">播完排队音频后结束本次会话</text>
+<rect x="523" y="1967" width="314" height="44" rx="10" fill="#FFFFFF" stroke="#D9E1EA"/>
+<text x="680" y="1991.96" fill="#34445B" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="17" font-weight="400" text-anchor="middle">释放主持占用权，恢复回合计时</text>
+<rect x="40" y="2052" width="1280" height="120" rx="10" fill="#F2F5F8"/>
+<text x="58" y="2084.08" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="start">整段播放：其他成员、自动主持与重听，通过 HTTP 获取音频，以 currentTime 和 audioCues 同步界面。</text>
+<text x="58" y="2117.08" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="start">投票结算：重复语音工具链路，灵矽调用 game.vote，Go 负责计票、淘汰和胜负判断。</text>
+<text x="58" y="2150.08" fill="#43556C" font-family="Hiragino Sans GB,PingFang SC,Microsoft YaHei,sans-serif" font-size="16" font-weight="400" text-anchor="start">按钮文字：HTTP 直接执行规则，有待处理 AI 时，Go 用缓存的“继续主持”语音触发灵矽接续。</text>
+</svg>
