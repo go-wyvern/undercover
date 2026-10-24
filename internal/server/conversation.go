@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-wyvern/undercover/internal/auth"
 	"github.com/go-wyvern/undercover/internal/game"
@@ -49,6 +50,7 @@ func (a *App) assistantVoice(w http.ResponseWriter, r *http.Request, u *auth.Use
 	var audioMu sync.Mutex
 	var recording []byte
 	getRecording := func() []byte { audioMu.Lock(); defer audioMu.Unlock(); return append([]byte(nil), recording...) }
+	connectedAt := time.Now()
 	upstream, err := a.openGameAgent(ctx, id, u.ID, getRecording)
 	if err != nil {
 		slog.Warn("Linx assistant connection failed", "error", err)
@@ -56,6 +58,7 @@ func (a *App) assistantVoice(w http.ResponseWriter, r *http.Request, u *auth.Use
 		return
 	}
 	defer upstream.Close()
+	slog.Info("Linx assistant ready", "room", id, "connect_ms", time.Since(connectedAt).Milliseconds())
 	_ = upstream.WriteJSON(map[string]any{"type": "abort", "session_id": upstream.SessionID})
 	if upstream.Listen("start") != nil {
 		return
@@ -130,7 +133,31 @@ func (a *App) openGameAgent(ctx context.Context, id, uid string, recording func(
 		return nil, err
 	}
 	contextJSON, _ := json.Marshal(public)
-	return a.voice.OpenWithTools(ctx, uid+"/assistant", linx.SessionOptions{Tools: gameTools(), Call: a.gameToolHandler(id, uid, recording), Prompt: map[string]string{"game_context": string(contextJSON), "game_instructions": hostInstructions}})
+	// This input belongs to this connection and authenticated actor only.
+	var inputMu sync.Mutex
+	var input string
+	getInput := func() string { inputMu.Lock(); defer inputMu.Unlock(); return input }
+	onTranscript := func(text string) { inputMu.Lock(); input = strings.TrimSpace(text); inputMu.Unlock() }
+	tools := gameTools()
+	if recording == nil {
+		// A synthetic continuation is not a human utterance or authorization.
+		getInput = nil
+		onTranscript = nil
+		recording = func() []byte { return nil }
+		var automatic []linx.Tool
+		for _, tool := range tools {
+			switch tool.Name {
+			case "game.get_state", "game.get_rules", "game.get_ai_batch", "game.submit_ai_batch":
+				automatic = append(automatic, tool)
+			}
+		}
+		tools = automatic
+	}
+	return a.voice.OpenWithTools(ctx, uid+"/assistant", linx.SessionOptions{
+		Tools: tools, Call: a.gameToolHandler(id, uid, recording, getInput),
+		Prompt:       map[string]string{"game_context": string(contextJSON), "game_instructions": hostInstructions},
+		OnTranscript: onTranscript,
+	})
 }
 func (a *App) receiveAssistant(ctx context.Context, id, uid string, upstream *linx.Session, output assistantOutput) error {
 	emit := func(value any) error {
@@ -139,6 +166,7 @@ func (a *App) receiveAssistant(ctx context.Context, id, uid string, upstream *li
 		}
 		return nil
 	}
+	startedAt := time.Now()
 	var packets [][]byte
 	var response strings.Builder
 	size := 0
@@ -185,6 +213,8 @@ func (a *App) receiveAssistant(ctx context.Context, id, uid string, upstream *li
 			continue
 		}
 		if msg.Type == "stt" && strings.TrimSpace(msg.Text) != "" {
+			upstream.NoteTranscript(msg.Text)
+			slog.Info("Linx speech recognized", "room", id, "characters", utf8.RuneCountInString(msg.Text), "elapsed_ms", time.Since(startedAt).Milliseconds())
 			_ = emit(map[string]string{"type": "transcript", "text": msg.Text})
 			continue
 		}

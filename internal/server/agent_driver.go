@@ -90,7 +90,7 @@ func (a *App) advanceAgentTurn(parent context.Context, id, uid string) error {
 	}
 	var session *linx.Session
 	for {
-		session, err = a.openGameAgent(ctx, id, uid, func() []byte { return nil })
+		session, err = a.openGameAgent(ctx, id, uid, nil)
 		if !errors.Is(err, linx.ErrBusy) {
 			break
 		}

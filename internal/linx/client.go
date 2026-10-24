@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -31,6 +32,13 @@ type Provider struct {
 	cfg       Config
 	available chan string
 	client    *http.Client
+	otaMu     sync.Mutex
+	otaCache  map[string]cachedOTA
+}
+
+type cachedOTA struct {
+	response OTAResponse
+	expires  time.Time
 }
 type OTAResponse struct {
 	Error      string `json:"error,omitempty"`
@@ -78,7 +86,7 @@ func New(cfg Config) (*Provider, error) {
 	if cfg.APIURL == "" {
 		cfg.APIURL = "https://xrobo.qiniu.com"
 	}
-	p := &Provider{cfg: cfg, available: make(chan string, len(cfg.DeviceIDs)), client: &http.Client{Timeout: 10 * time.Second}}
+	p := &Provider{cfg: cfg, available: make(chan string, len(cfg.DeviceIDs)), client: &http.Client{Timeout: 10 * time.Second}, otaCache: map[string]cachedOTA{}}
 	seen := map[string]bool{}
 	for _, id := range cfg.DeviceIDs {
 		id = strings.ToUpper(strings.TrimSpace(id))
@@ -106,6 +114,13 @@ func clientUUID(s string) string {
 }
 
 func (p *Provider) OTA(ctx context.Context, device, clientID string) (OTAResponse, error) {
+	key := device + "/" + clientID
+	p.otaMu.Lock()
+	cached, ok := p.otaCache[key]
+	p.otaMu.Unlock()
+	if ok && time.Now().Before(cached.expires) {
+		return cached.response, nil
+	}
 	uuid := clientUUID(clientID)
 	body, _ := json.Marshal(map[string]any{"mac_address": device, "uuid": uuid, "application": map[string]string{"name": "undercover-web", "version": "0.1.0", "elf_sha256": strings.Repeat("0", 64)}, "board": map[string]any{"type": "xiaoling-web-test", "ssid": "web", "rssi": 0}})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.OTAURL, bytes.NewReader(body))
@@ -132,6 +147,13 @@ func (p *Provider) OTA(ctx context.Context, device, clientID string) (OTARespons
 	}
 	if out.Error != "" {
 		return out, errors.New("OTA rejected device report")
+	}
+	// A short in-memory cache avoids another OTA round trip for every press.
+	// Activation codes are never cached; rejected tokens are refreshed on dial.
+	if out.WebSocket.Token != "" && out.Activation == nil {
+		p.otaMu.Lock()
+		p.otaCache[key] = cachedOTA{response: out, expires: time.Now().Add(time.Minute)}
+		p.otaMu.Unlock()
 	}
 	return out, nil
 }
@@ -164,10 +186,57 @@ func (p *Provider) Agent(ctx context.Context, id string) (json.RawMessage, error
 	}
 	return envelope.Data, nil
 }
+func (p *Provider) dialDevice(ctx context.Context, device string) (*websocket.Conn, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		token, wsURL := p.cfg.Token, p.cfg.WSURL
+		if token == "" {
+			out, err := p.OTA(ctx, device, "undercover/"+device)
+			if err != nil {
+				return nil, err
+			}
+			if out.WebSocket.Token == "" {
+				return nil, errors.New("灵矽软件终端尚未绑定智能体，请先执行设备接入配置")
+			}
+			token = out.WebSocket.Token
+			if out.WebSocket.URL != "" {
+				wsURL = out.WebSocket.URL
+			}
+		}
+		u, err := url.Parse(wsURL)
+		if err != nil {
+			return nil, errors.New("invalid voice URL")
+		}
+		if u.Scheme == "ws" && strings.HasSuffix(u.Hostname(), ".qiniuapi.com") {
+			u.Scheme = "wss"
+		}
+		if u.Scheme != "wss" && !(u.Scheme == "ws" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost")) {
+			return nil, errors.New("voice connection requires WSS")
+		}
+		headers := http.Header{"Authorization": {"Bearer " + token}, "Device-Id": {device}, "Client-Id": {clientUUID("undercover/" + device)}, "Protocol-Version": {"1"}}
+		dialer := websocket.Dialer{HandshakeTimeout: 8 * time.Second, Proxy: http.ProxyFromEnvironment}
+		conn, response, err := dialer.DialContext(ctx, u.String(), headers)
+		if err == nil {
+			return conn, nil
+		}
+		if response != nil && response.Body != nil {
+			response.Body.Close()
+		}
+		if p.cfg.Token == "" && attempt == 0 && response != nil && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
+			p.otaMu.Lock()
+			delete(p.otaCache, device+"/undercover/"+device)
+			p.otaMu.Unlock()
+			continue
+		}
+		return nil, fmt.Errorf("voice handshake failed: %w", err)
+	}
+	return nil, errors.New("voice authentication failed")
+}
+
 func (p *Provider) Open(ctx context.Context, identity string) (*Session, error) {
 	return p.OpenWithTools(ctx, identity, SessionOptions{})
 }
 func (p *Provider) OpenWithTools(ctx context.Context, identity string, options SessionOptions) (*Session, error) {
+	startedAt := time.Now()
 	if !p.Configured() {
 		return nil, errors.New("灵矽语音尚未配置")
 	}
@@ -189,44 +258,14 @@ func (p *Provider) OpenWithTools(ctx context.Context, identity string, options S
 		}
 	}
 	release := func() { p.available <- device }
-	token, wsURL := p.cfg.Token, p.cfg.WSURL
-	if token == "" {
-		out, err := p.OTA(ctx, device, "undercover/"+device)
-		if err != nil {
-			release()
-			return nil, err
-		}
-		if out.WebSocket.Token == "" {
-			release()
-			return nil, errors.New("灵矽软件终端尚未绑定智能体，请先执行设备接入配置")
-		}
-		token = out.WebSocket.Token
-		if out.WebSocket.URL != "" {
-			wsURL = out.WebSocket.URL
-		}
-	}
-	u, err := url.Parse(wsURL)
+	acquiredAt := time.Now()
+	conn, err := p.dialDevice(ctx, device)
 	if err != nil {
 		release()
-		return nil, errors.New("invalid voice URL")
+		return nil, err
 	}
-	if u.Scheme == "ws" && strings.HasSuffix(u.Hostname(), ".qiniuapi.com") {
-		u.Scheme = "wss"
-	}
-	if u.Scheme != "wss" && !(u.Scheme == "ws" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost")) {
-		release()
-		return nil, errors.New("voice connection requires WSS")
-	}
-	headers := http.Header{"Authorization": {"Bearer " + token}, "Device-Id": {device}, "Client-Id": {clientUUID("undercover/" + device)}, "Protocol-Version": {"1"}}
-	dialer := websocket.Dialer{HandshakeTimeout: 8 * time.Second, Proxy: http.ProxyFromEnvironment}
-	conn, res, err := dialer.DialContext(ctx, u.String(), headers)
-	if res != nil && res.Body != nil {
-		_ = res.Body.Close()
-	}
-	if err != nil {
-		release()
-		return nil, fmt.Errorf("voice handshake failed: %w", err)
-	}
+	dialedAt := time.Now()
+
 	s := &Session{Conn: conn, release: release, SampleRate: 24000, FrameDuration: 60, AudioFormat: "opus", done: make(chan struct{}), options: options, mcpReplies: map[string]any{}}
 	conn.SetReadLimit(2 << 20)
 	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -275,6 +314,7 @@ func (p *Provider) OpenWithTools(ctx context.Context, identity string, options S
 				case <-s.done:
 				}
 			}()
+			slog.Info("Linx connection stages", "queue_ms", acquiredAt.Sub(startedAt).Milliseconds(), "dial_ms", dialedAt.Sub(acquiredAt).Milliseconds(), "hello_ms", time.Since(dialedAt).Milliseconds())
 			return s, nil
 		}
 	}

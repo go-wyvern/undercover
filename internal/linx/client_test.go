@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -186,5 +188,62 @@ func TestPCMNarrationPreservesNegotiatedFormatAndSampleRate(t *testing.T) {
 	}
 	if string(audio[:4]) != "RIFF" || binary.LittleEndian.Uint32(audio[24:]) != 24000 || binary.LittleEndian.Uint32(audio[28:]) != 48000 || string(audio[44:]) != string(pcm) {
 		t.Fatal("PCM must be emitted as WAV with its actual sample rate, not wrapped as Opus")
+	}
+}
+
+func TestDeviceOTACacheRefreshesRejectedCredentials(t *testing.T) {
+	var otaCalls atomic.Int32
+	var rejectOld atomic.Bool
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if rejectOld.Load() && r.Header.Get("Authorization") == "Bearer token-1" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		ws, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.Close()
+		var hello map[string]any
+		if ws.ReadJSON(&hello) != nil {
+			return
+		}
+		_ = ws.WriteJSON(map[string]any{"type": "hello", "session_id": "cached", "audio_params": map[string]any{"format": "pcm", "sample_rate": 16000}})
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer wsServer.Close()
+	ota := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := otaCalls.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"websocket": map[string]any{"url": strings.Replace(wsServer.URL, "http", "ws", 1), "token": fmt.Sprintf("token-%d", n)}})
+	}))
+	defer ota.Close()
+	provider, err := New(Config{DeviceIDs: []string{"02:00:00:00:00:01"}, OTAURL: ota.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	for i := 0; i < 2; i++ {
+		session, err := provider.Open(ctx, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		session.Close()
+	}
+	if otaCalls.Load() != 1 {
+		t.Fatal("every press repeated OTA")
+	}
+	rejectOld.Store(true)
+	session, err := provider.Open(ctx, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.Close()
+	if otaCalls.Load() != 2 {
+		t.Fatal("rejected cached token was not refreshed")
 	}
 }

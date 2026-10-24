@@ -45,6 +45,21 @@ export function usePushToTalk(
   let frames: Uint8Array[] = []
   let flushed: (() => void) | null = null
   let generation = 0
+  let upstreamReady = false
+  let inputFinished = false
+  let stopping = false
+  let stopSent = false
+  let sentFrames = 0
+  let connectionTimer: ReturnType<typeof setTimeout> | undefined
+
+  function sendPendingInput() {
+    if (!upstreamReady || socket?.readyState !== WebSocket.OPEN) return
+    while (sentFrames < frames.length) socket.send(frames[sentFrames++]!)
+    if (inputFinished && !stopSent) {
+      socket.send(JSON.stringify({ type: 'stop' }))
+      stopSent = true
+    }
+  }
 
   function stopTracks(keepContext = false) {
     stream?.getTracks().forEach((track) => track.stop())
@@ -81,6 +96,12 @@ export function usePushToTalk(
     flushed?.()
     flushed = null
     frames = []
+    upstreamReady = false
+    inputFinished = false
+    stopping = false
+    stopSent = false
+    sentFrames = 0
+    clearTimeout(connectionTimer)
   }
   async function start(roomId: string, fullConversation = false) {
     if (pressed || connecting.value || recognizing.value || recording.value) return
@@ -105,16 +126,16 @@ export function usePushToTalk(
       stream = localStream
       const localContext = new AudioContext()
       context = localContext
-      await localContext.audioWorklet.addModule('/pcm-worklet.js')
-      if (run !== generation || !pressed) {
-        cancel()
-        return
-      }
       const ws = new WebSocket(
         `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/rooms/${encodeURIComponent(roomId)}/${fullConversation ? 'assistant/voice' : 'voice'}`,
       )
       socket = ws
       ws.binaryType = 'arraybuffer'
+      connectionTimer = setTimeout(() => {
+        if (run !== generation || upstreamReady) return
+        cancel()
+        onError('灵矽连接超时，本次录音未提交，请重试')
+      }, 25000)
       let received = false
       ws.onmessage = async ({ data }) => {
         if (run !== generation) return
@@ -149,38 +170,10 @@ export function usePushToTalk(
         }
         if (message.type === 'ready') {
           outputRate = Number(message.sampleRate) || 16000
-          if (!pressed) {
-            cancel()
-            return
-          }
+          upstreamReady = true
           connecting.value = false
-          await localContext.resume()
-          if (run !== generation || !pressed) {
-            cancel()
-            return
-          }
-          const node = new AudioWorkletNode(localContext, 'pcm-recorder')
-          recorder = node
-          node.port.onmessage = ({ data }) => {
-            if (data.type === 'flushed') {
-              flushed?.()
-              flushed = null
-              return
-            }
-            if (data.type !== 'pcm' || run !== generation) return
-            const pcm = new Uint8Array(data.buffer)
-            frames.push(pcm)
-            if (ws.readyState === WebSocket.OPEN) ws.send(pcm)
-          }
-          const source = localContext.createMediaStreamSource(localStream)
-          const silent = localContext.createGain()
-          silent.gain.value = 0
-          source.connect(node).connect(silent).connect(localContext.destination)
-          recording.value = true
-          timer = setInterval(() => {
-            seconds.value++
-            if (seconds.value >= 30) void stop()
-          }, 1000)
+          clearTimeout(connectionTimer)
+          sendPendingInput()
         } else if (message.type === 'transcript' && fullConversation) {
           transcript.value = message.text || ''
           recognizing.value = true
@@ -230,6 +223,36 @@ export function usePushToTalk(
           onError('语音连接已断开，请重试')
         }
       }
+      // Capture immediately while the upstream OTA / WebSocket handshake runs.
+      // Releasing before ready keeps the recorded frames and queues the stop.
+      await localContext.audioWorklet.addModule('/pcm-worklet.js')
+      if (run !== generation) return
+      if (!pressed) {cancel(); return}
+      await localContext.resume()
+      if (run !== generation) return
+      if (!pressed) {cancel(); return}
+      const node = new AudioWorkletNode(localContext, 'pcm-recorder')
+      recorder = node
+      node.port.onmessage = ({ data }) => {
+        if (run !== generation) return
+        if (data.type === 'flushed') {
+          flushed?.()
+          flushed = null
+          return
+        }
+        if (data.type !== 'pcm' || inputFinished) return
+        frames.push(new Uint8Array(data.buffer))
+        sendPendingInput()
+      }
+      const source = localContext.createMediaStreamSource(localStream)
+      const silent = localContext.createGain()
+      silent.gain.value = 0
+      source.connect(node).connect(silent).connect(localContext.destination)
+      recording.value = true
+      timer = setInterval(() => {
+        seconds.value++
+        if (seconds.value >= 30) void stop()
+      }, 1000)
     } catch (error) {
       if (run !== generation) return
       cancel()
@@ -240,11 +263,12 @@ export function usePushToTalk(
   }
   async function stop() {
     pressed = false
-    if (connecting.value) {
-      cancel()
+    if (!recording.value) {
+      if (connecting.value) cancel()
       return
     }
-    if (!recording.value || recognizing.value) return
+    if (stopping || inputFinished) return
+    stopping = true
     recognizing.value = true
     const run = generation
     if (recorder) {
@@ -262,9 +286,9 @@ export function usePushToTalk(
       })
     }
     if (run !== generation) return
-    stopTracks(assistant.value)
-    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'stop' }))
-    else cancel()
+    stopTracks(true)
+    inputFinished = true
+    sendPendingInput()
   }
   return { recording, connecting, recognizing, seconds, assistant, transcript, streaming, replyText, activeCue, completedReply, start, stop, cancel, muteOutput }
 }

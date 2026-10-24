@@ -437,6 +437,11 @@ func TestFullAssistantKeepsModelToolsAndReplyAudioAfterTranscription(t *testing.
 			}
 		}
 		_ = ws.WriteJSON(map[string]string{"type": "stt", "text": "开始游戏"})
+		state := rpc(6, "tools/call", map[string]any{"name": "game.get_state", "arguments": map[string]any{}})
+		stateJSON, _ := json.Marshal(state)
+		if !strings.Contains(string(stateJSON), "currentUtterance") || !strings.Contains(string(stateJSON), "开始游戏") {
+			t.Error("recognized input did not reach the model tool context")
+		}
 		result := rpc(3, "tools/call", map[string]any{"name": "game.start", "arguments": map[string]any{}})
 		raw, _ = json.Marshal(result)
 		if strings.Contains(string(raw), "myWord") {

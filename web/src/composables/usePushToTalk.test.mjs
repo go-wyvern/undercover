@@ -103,3 +103,77 @@ test('sentences arriving ahead of audio remain hidden until their scheduled play
   assert.equal(voice.activeCue.value.playerId,'bot-3')
   assert.equal(voice.replyText.value,'三号的描述')
 })
+
+
+test('captures the beginning while connecting and sends it before live audio',async()=>{
+  await voice.start('my-room',true)
+  assert.equal(voice.recording.value,true)
+  assert.equal(voice.connecting.value,true)
+  const early = new Uint8Array([1,0,2,0])
+  worklet.port.onmessage({data:{type:'pcm',buffer:early.buffer}})
+  assert.equal(ws.sent.length,0)
+  await message({type:'ready',sampleRate:'24000'})
+  assert.deepEqual(ws.sent,[early])
+  const live = new Uint8Array([3,0,4,0])
+  worklet.port.onmessage({data:{type:'pcm',buffer:live.buffer}})
+  await voice.stop()
+  assert.deepEqual(ws.sent.slice(0,2),[early,live])
+  assert.deepEqual(JSON.parse(ws.sent[2]),{type:'stop'})
+  assert.equal(voice.recognizing.value,true)
+  assert.deepEqual(errors,[])
+})
+
+test('releasing before ready preserves the whole utterance and queues one stop',async()=>{
+  await voice.start('my-room',true)
+  const pcm = new Uint8Array(640).fill(1)
+  worklet.port.onmessage({data:{type:'pcm',buffer:pcm.buffer}})
+  await voice.stop()
+  assert.equal(stopped,true)
+  assert.equal(ctx.closed,false)
+  assert.equal(voice.recognizing.value,true)
+  assert.equal(ws.sent.length,0)
+  assert.equal(ws.readyState,1)
+  await message({type:'ready'})
+  await message({type:'ready'})
+  assert.equal(ws.sent.length,2)
+  assert.deepEqual(ws.sent[0],pcm)
+  assert.deepEqual(JSON.parse(ws.sent[1]),{type:'stop'})
+  await message({type:'transcript',text:'这是连接期间完整录下的描述'})
+  assert.equal(voice.transcript.value,'这是连接期间完整录下的描述')
+  assert.deepEqual(errors,[])
+})
+
+test('explicit cancellation discards pending audio and ignores a late ready',async()=>{
+  await voice.start('my-room',true)
+  worklet.port.onmessage({data:{type:'pcm',buffer:new ArrayBuffer(640)}})
+  voice.cancel()
+  await message({type:'ready'})
+  assert.equal(ws.sent.length,0)
+  assert.equal(ws.readyState,3)
+  assert.equal(voice.recording.value,false)
+  assert.deepEqual(errors,[])
+})
+
+
+test('flushes the final partial frame before a queued stop',async()=>{
+  await voice.start('my-room',true)
+  const tail = new Uint8Array([7,0,8,0])
+  worklet.port.postMessage = () => {
+    worklet.port.onmessage({data:{type:'pcm',buffer:tail.buffer}})
+    worklet.port.onmessage({data:{type:'flushed'}})
+  }
+  await voice.stop()
+  assert.equal(ws.sent.length,0)
+  await message({type:'ready'})
+  assert.deepEqual(ws.sent[0],tail)
+  assert.deepEqual(JSON.parse(ws.sent[1]),{type:'stop'})
+})
+
+test('an early transcript does not prevent release from stopping the microphone',async()=>{
+  await ready()
+  await message({type:'transcript',text:'提前识别的片段'})
+  await voice.stop()
+  assert.equal(stopped,true)
+  assert.equal(voice.recording.value,false)
+  assert.deepEqual(JSON.parse(ws.sent.at(-1)),{type:'stop'})
+})

@@ -24,8 +24,8 @@ func TestGameToolsRespectActorAndDriveAIWithoutPublicSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	handler := a.gameToolHandler("room-1", "host", func() []byte { return nil })
-	other := a.gameToolHandler("room-1", "other", func() []byte { return nil })
+	handler := a.gameToolHandler("room-1", "host", func() []byte { return nil }, nil)
+	other := a.gameToolHandler("room-1", "other", func() []byte { return nil }, nil)
 	if _, err = other(context.Background(), "game.start", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("non-host used start tool")
 	}
@@ -87,5 +87,46 @@ func TestAgentReplyBeforeGame(t *testing.T) {
 	}
 	if _, _, err = m.Event("room-1", "outsider", "welcome"); err == nil {
 		t.Fatal("outsider accessed private room audio")
+	}
+}
+
+func TestVoiceDescriptionUsesRecognizedOriginalAndKeepsItInThisSession(t *testing.T) {
+	a, err := newTestApp(Config{Auth: auth.Config{AllowGuest: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	_, _ = a.rooms.Join("room-1", "host", "房主", "")
+	input := "它在生活里很常见，可以用来传递消息。"
+	handler := a.gameToolHandler("room-1", "host", func() []byte { return nil }, func() string { return input })
+	_, err = handler(context.Background(), "game.start", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := handler(context.Background(), "game.get_state", json.RawMessage(`{}`))
+	if err != nil || state.(map[string]any)["currentUtterance"] != input {
+		t.Fatal("model lost this utterance")
+	}
+	otherSession := a.gameToolHandler("room-1", "host", func() []byte { return nil }, nil)
+	otherState, _ := otherSession(context.Background(), "game.get_state", json.RawMessage(`{}`))
+	if otherState.(map[string]any)["currentUtterance"] != "" {
+		t.Fatal("utterance leaked to another conversation")
+	}
+	_, err = handler(context.Background(), "game.submit_description", json.RawMessage(`{"text":"模型改写的另一句话。"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, _ := a.rooms.View("room-1", "host")
+	found := false
+	for _, log := range view.Logs {
+		if log.Kind == "speech" && log.PlayerID == view.MyPlayerID {
+			found = true
+			if log.Text != input {
+				t.Fatalf("speech was replaced: %q", log.Text)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("recognized speech was not saved")
 	}
 }

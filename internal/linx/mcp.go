@@ -13,9 +13,17 @@ type Tool struct {
 }
 type ToolHandler func(context.Context, string, json.RawMessage) (any, error)
 type SessionOptions struct {
-	Tools  []Tool
-	Call   ToolHandler
-	Prompt map[string]string
+	Tools        []Tool
+	Call         ToolHandler
+	Prompt       map[string]string
+	OnTranscript func(string)
+}
+
+// NoteTranscript keeps recognized input available to room-bound tool calls.
+func (s *Session) NoteTranscript(text string) {
+	if s.options.OnTranscript != nil {
+		s.options.OnTranscript(text)
+	}
 }
 
 // HandleMCP answers device-side JSON-RPC requests on the same authenticated socket.

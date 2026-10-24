@@ -260,12 +260,12 @@ const canRecord = computed(
   () => config.value.voiceConfigured && !busy.value && (!room.value?.agentActive || voice.recording.value || voice.recognizing.value || voice.connecting.value),
 )
 const pttText = computed(() =>
-  voice.connecting.value
-    ? '连接麦克风'
+  voice.recording.value
+    ? `松开结束 · ${voice.seconds.value}s`
     : voice.recognizing.value
-      ? voice.assistant.value ? '灵矽正在回应' : '正在识别'
-      : voice.recording.value
-        ? `松开结束 · ${voice.seconds.value}s`
+      ? voice.connecting.value ? '正在发送录音' : voice.assistant.value ? '灵矽正在回应' : '正在识别'
+      : voice.connecting.value
+        ? '正在开启麦克风'
         : config.value.voiceConfigured
           ? '按住和灵矽说话'
           : me.value?.alive === false
@@ -291,7 +291,7 @@ const dealerCaption = computed(() => {
 })
 
 const voiceHint = computed(() => {
-  if (voice.recording.value) return '正在录音，最长 30 秒'
+  if (voice.recording.value) return voice.connecting.value ? '正在录音并连接灵矽，松开后自动发送' : '正在录音，最长 30 秒'
   if (!config.value.voiceConfigured) return '语音尚未开启，可使用体验模式和文字操作'
   if (room.value?.phase === 'waiting')
     return room.value.isHost ? '按住说：开始游戏' : '开局请等房主，你也可以先询问玩法'

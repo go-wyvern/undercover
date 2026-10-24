@@ -250,3 +250,13 @@ REDIS_PASSWORD=
 `sslmode` 按现有 PostgreSQL 服务配置填写。Redis 没有启用认证时，上面的用户名、密码留空；PostgreSQL 新建的账号不会同步创建 Redis 用户。如需独立 Redis ACL 用户，需由 Redis 管理员在每个 Cluster 节点配置并持久化 ACL；本应用会话键前缀为 `undercover:session:*`，需要 GET / SET / DEL、连接握手及 Cluster 拓扑查询权限。Cluster 公布的节点地址也必须对应用 Pod 可达。
 
 PostgreSQL 操作参考官方 [CREATE ROLE](https://www.postgresql.org/docs/17/sql-createrole.html)、[CREATE DATABASE](https://www.postgresql.org/docs/17/sql-createdatabase.html)；Redis 用户管理参考 [ACL 文档](https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/)。
+
+## 语音交互时序与排查
+
+按住说话后，浏览器取得麦克风权限即开始录音，同时连接 Go / 灵矽；连接期间的 PCM 会保存在浏览器内存里。无需等服务端 `ready` 才开口，松手后会按顺序发送全部录音及结束标记；连接中松手也会保留并发送已录内容。显式取消、离开页面或连接超时才会丢弃未提交录音；首次使用仍需允许浏览器麦克风权限。
+
+Go 在本次连接中保存灵矽返回的识别原文，`game.get_state` 的 `currentUtterance` 会返回它。由灵矽判断用户意图；确认是本人描述后调用 `game.submit_description`，Go 优先保存该原文，避免模型重新生成一句话。提交前的原文只供当前用户的这次连接使用，未经工具提交的语音不会发布成公开房间记录。自动 AI 续接只能调用查询与 AI 任务工具，不会把内部续接口令当成真人描述。
+
+主持提示词不再要求每次先查询状态。若控制台仍配置了旧版固定提示词，请同步 `docs/linx-host-prompt.txt`，保留 `{{game_context}}` 和 `{{game_instructions}}` 两个占位符；它们会在每次连接时由 Go 注入当前状态和最新约束。
+
+已绑定设备的 OTA 结果仅在 Go 内存中短暂缓存一分钟；鉴权被拒时自动重新获取。设备池仍按设备身份串行分配，同一个设备用于真人对话、自动 AI 和播报时可能排队。日志中的 `Linx connection stages` 分别记录 `queue_ms`、`dial_ms`、`hello_ms`；`Linx assistant ready` 记录连接总耗时，`Linx speech recognized` 记录识别到达时间与字数，不记录语音原文、词卡或 Token。
