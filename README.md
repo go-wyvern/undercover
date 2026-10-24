@@ -17,6 +17,10 @@
 
 灵矽智能体负责语音识别、理解玩家意图、生成 AI 玩家的描述与投票，并提供语音合成；Go 通过 MCP 工具执行游戏操作、保存房间并校验规则。前端采用 Vue 3 + TypeScript，由 `go:embed` 嵌入 Go 程序。
 
+## 演示视频
+
+[▶ 在哔哩哔哩观看 UnderCover ｜ 卧底俱乐部演示](https://www.bilibili.com/video/BV1VDHN6FENF/)
+
 ## 1. 准备环境
 
 从源码构建并运行，需要准备：
