@@ -26,10 +26,12 @@ func TestHumanVoiceLeaseChecksCurrentTurnWithoutBlockingAutomaticAI(t *testing.T
 		t.Fatal(err)
 	}
 	release()
+	acknowledgePlayback(t, m, "room-1")
 	_, _ = m.Speak("room-1", "host", "这是在日常生活中可以见到的东西。", nil)
 	if _, err := m.AcquireHumanAgent("room-1", "host"); err == nil {
 		t.Fatal("player 1 could interrupt player 2")
 	}
+	acknowledgePlayback(t, m, "room-1")
 	release, err = m.AcquireHumanAgent("room-1", "second")
 	if err != nil {
 		t.Fatal("player 2 could not use their own turn")

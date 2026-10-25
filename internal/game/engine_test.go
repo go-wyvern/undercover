@@ -215,6 +215,9 @@ func TestTimeoutSkipsOnlyCurrentPlayer(t *testing.T) {
 	m.mu.Lock()
 	g := m.rooms["room-1"].Game
 	g.Begin()
+	m.mu.Unlock()
+	acknowledgePlayback(t, m, "room-1")
+	m.mu.Lock()
 	g.Deadline = time.Now().Add(-time.Second).UnixMilli()
 	m.mu.Unlock()
 	m.tick()
@@ -307,8 +310,12 @@ func TestAgentConversationPausesExpiredTurnsAndReleasesControl(t *testing.T) {
 	m.mu.Lock()
 	g := m.rooms["room-1"].Game
 	g.Begin()
+	m.mu.Unlock()
+	acknowledgePlayback(t, m, "room-1")
+	m.mu.Lock()
 	g.Deadline = time.Now().Add(-time.Second).UnixMilli()
 	before := g.CurrentID()
+	deadline := g.Deadline
 	m.mu.Unlock()
 	release, err := m.AcquireAgent("room-1", "u")
 	if err != nil {
@@ -324,8 +331,8 @@ func TestAgentConversationPausesExpiredTurnsAndReleasesControl(t *testing.T) {
 	}
 	release()
 	v, _ = m.View("room-1", "u")
-	if v.AgentActive || v.Deadline < time.Now().UnixMilli() {
-		t.Fatal("host did not restore a usable turn")
+	if v.AgentActive || v.Deadline != deadline {
+		t.Fatal("release reset the turn deadline")
 	}
 }
 
@@ -391,6 +398,8 @@ func TestAISpeechesCommitIndividuallyAndBallotsWaitForHumans(t *testing.T) {
 	if batch, _ = m.NextAIBatch("room-1", "u"); batch != nil {
 		t.Fatal("AI ballots must wait until humans have voted")
 	}
+	release()
+	acknowledgePlayback(t, m, "room-1")
 	v, _ := m.View("room-1", "u")
 	_, err = m.Vote("room-1", "u", v.Players[1].ID)
 	if err != nil {

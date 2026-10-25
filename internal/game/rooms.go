@@ -17,6 +17,7 @@ import (
 )
 
 type Room struct {
+	Action        *ActionWindow  `json:"actionWindow,omitempty"`
 	ID            string         `json:"id"`
 	Name          string         `json:"name"`
 	Theme         string         `json:"theme"`
@@ -68,6 +69,8 @@ type Summary struct {
 }
 type View struct {
 	Summary
+	Action           *ActionView    `json:"action,omitempty"`
+	ServerNow        int64          `json:"serverNow"`
 	LobbyPlayers     []PublicPlayer `json:"lobbyPlayers,omitempty"`
 	CanStart         bool           `json:"canStart"`
 	StartBlockReason string         `json:"startBlockReason,omitempty"`
@@ -211,6 +214,7 @@ func (m *Manager) notifyLocked(id string) {
 	}
 }
 func (m *Manager) commitLocked(r *Room, backup []byte) error {
+	m.syncActionLocked(r, time.Now())
 	r.Version++
 	if err := m.persistLocked(r); err != nil {
 		var restored Room
@@ -321,7 +325,7 @@ func (m *Manager) View(id, uid string) (View, error) {
 	return view(r, uid), nil
 }
 func view(r *Room, uid string) View {
-	v := View{Summary: summary(r), Version: r.Version, IsHost: r.OwnerID == uid, Logs: []Log{}, CandidateIDs: []string{}, LegalTargets: []string{}, Reveals: []Reveal{}, LastVotes: []Ballot{}}
+	v := View{ServerNow: time.Now().UnixMilli(), Summary: summary(r), Version: r.Version, IsHost: r.OwnerID == uid, Logs: []Log{}, CandidateIDs: []string{}, LegalTargets: []string{}, Reveals: []Reveal{}, LastVotes: []Ballot{}}
 	p := member(r, uid)
 	if p == nil {
 		return v
@@ -333,6 +337,7 @@ func view(r *Room, uid string) View {
 	}
 	v.StartBlockReason = startBlockReason(r)
 	v.CanStart = lobbyPhase(r) && v.StartBlockReason == ""
+	v.Action = actionView(r, p.ID)
 	v.AgentActive = r.AgentActive
 	v.MyPlayerID = p.ID
 	v.Logs = append(v.Logs, r.Logs...)
@@ -591,6 +596,9 @@ func (m *Manager) Speak(id, uid, text string, pcm []byte) (View, error) {
 	if len(pcm) == 0 && pendingSpeechMatches(r) && r.PendingSpeech.PlayerID == p.ID && r.PendingSpeech.Text == strings.TrimSpace(text) {
 		pcm = append([]byte(nil), m.audio[id+"/draft"]...)
 	}
+	if err := requireAction(r); err != nil {
+		return View{}, err
+	}
 	if err := r.Game.Speak(p.ID, text, len(pcm) > 0); err != nil {
 		return View{}, err
 	}
@@ -684,6 +692,9 @@ func (m *Manager) Vote(id, uid, target string) (View, error) {
 		return View{}, errors.New("请先开始游戏")
 	}
 	b := backup(r)
+	if err := requireAction(r); err != nil {
+		return View{}, err
+	}
 	if err := r.Game.Vote(member(r, uid).ID, target); err != nil {
 		return View{}, err
 	}
@@ -700,6 +711,9 @@ func (m *Manager) Skip(id, uid string) (View, error) {
 		return View{}, errors.New("请先开始游戏")
 	}
 	b := backup(r)
+	if err := requireAction(r); err != nil {
+		return View{}, err
+	}
 	if err := r.Game.Skip(member(r, uid).ID); err != nil {
 		return View{}, err
 	}
@@ -743,7 +757,8 @@ func (m *Manager) Run(ctx context.Context) {
 		}
 	}
 }
-func (m *Manager) tick() {
+func (m *Manager) tick() { m.tickAt(time.Now()) }
+func (m *Manager) tickAt(now time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, r := range m.rooms {
@@ -751,20 +766,22 @@ func (m *Manager) tick() {
 		if g == nil || g.Phase == "finished" {
 			continue
 		}
-		if m.agentRooms[r.ID] && g.Phase != "dealing" {
-			continue
-		}
 		b := backup(r)
-		changed := false
-		if g.Phase == "dealing" && time.Now().UnixMilli() >= g.Deadline {
+		changed := m.syncActionLocked(r, now)
+		// A voice operation has a bounded processing grace; queries never reset
+		// the original deadline and cannot keep a turn alive indefinitely.
+		processing := m.agentRooms[r.ID] && g.Phase != "dealing" && (g.Deadline == 0 || now.UnixMilli() < g.Deadline+processingLimit.Milliseconds())
+		if g.Phase == "dealing" && now.UnixMilli() >= g.Deadline {
 			g.Begin()
+			m.syncActionLocked(r, now)
 			changed = true
 		}
-		if (g.Phase == "speaking" || g.Phase == "tiebreak") && !pendingSpeechMatches(r) && time.Now().UnixMilli() >= g.Deadline {
+		if !processing && g.Deadline > 0 && (g.Phase == "speaking" || g.Phase == "tiebreak") && !pendingSpeechMatches(r) && now.UnixMilli() >= g.Deadline {
 			_ = g.SkipTimeout(g.CurrentID())
+			m.syncActionLocked(r, now)
 			changed = true
 		}
-		if g.Phase == "voting" && time.Now().UnixMilli() >= g.Deadline {
+		if !processing && g.Deadline > 0 && g.Phase == "voting" && now.UnixMilli() >= g.Deadline {
 			ids := []string{}
 			for _, p := range g.Alive() {
 				if _, ok := g.Votes[p.ID]; !ok {
@@ -786,16 +803,16 @@ func (m *Manager) tick() {
 			}
 		}
 		g = r.Game
-		if m.agentRooms[r.ID] || m.externalAgent {
+		if m.agentRooms[r.ID] || m.externalAgent || requireAction(r) != nil {
 			continue
 		}
 		ids := []string{}
 		if id := g.CurrentID(); id != "" && g.Player(id).Bot {
-			if narrationReady(g, time.Now()) {
+			if narrationReady(g, now) {
 				ids = append(ids, id)
 			}
 		}
-		if g.Phase == "voting" && narrationReady(g, time.Now()) {
+		if g.Phase == "voting" && narrationReady(g, now) {
 			for _, p := range g.Alive() {
 				if _, ok := g.Votes[p.ID]; p.Bot && !ok {
 					ids = append(ids, p.ID)
@@ -876,7 +893,7 @@ func (m *Manager) worker(ctx context.Context) {
 				continue
 			}
 			g := r.Game
-			if m.agentRooms[r.ID] {
+			if m.agentRooms[r.ID] || requireAction(r) != nil {
 				m.mu.Unlock()
 				continue
 			}

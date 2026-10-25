@@ -3548,3 +3548,9 @@ svg {
 .readiness-reset-note { font-size: 10px; }
 .room-option { justify-content: space-between; padding: 14px 0 0; font-size: 13px; }
 .room-card-title h3 { display: flex; align-items: center; gap: 7px; }
+
+.playback-wait-bar { display:flex; align-items:center; gap:12px; background:#edf3e4; border:1px solid #dce5d0; border-radius:12px; padding:14px 18px; margin-bottom:16px; color:#466640; }
+.playback-wait-bar > div { flex:1; min-width:0; }
+.playback-wait-bar b { font-size:14px; }
+.playback-wait-bar p { margin-top:4px; font-size:12px; line-height:1.6; color:#7c8e70; }
+@media (max-width:600px) { .playback-wait-bar { flex-wrap:wrap; } .playback-wait-bar .button { margin-left:30px; } }

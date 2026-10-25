@@ -152,6 +152,18 @@ func (a *App) routes() http.Handler {
 		a.audioMu.Unlock()
 		reply(w, 200, map[string]bool{"ok": true})
 	}))
+	mux.HandleFunc("POST /api/rooms/{id}/playback-ready", a.withUser(func(w http.ResponseWriter, r *http.Request, u *auth.User) {
+		var in struct {
+			TurnID     string `json:"turnId"`
+			BoundaryID string `json:"throughLogId"`
+			Result     string `json:"result"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		v, err := a.rooms.PlaybackReady(r.PathValue("id"), u.ID, in.TurnID, in.BoundaryID, in.Result)
+		respond(w, v, err)
+	}))
 	a.lobbyRoutes(mux)
 	mux.HandleFunc("POST /api/rooms/{id}/start", a.withUser(func(w http.ResponseWriter, r *http.Request, u *auth.User) {
 		v, err := a.rooms.Start(r.PathValue("id"), u.ID)
@@ -366,7 +378,7 @@ func (a *App) voiceSocket(w http.ResponseWriter, r *http.Request, u *auth.User) 
 	}
 	canSpeak := (v.Phase == "speaking" || v.Phase == "tiebreak") && v.CurrentPlayerID == me.ID
 	canVote := v.Phase == "voting" && me.Alive && !me.HasVoted
-	if !canSpeak && !canVote {
+	if (!canSpeak && !canVote) || !game.VoiceTurnAllowed(v) {
 		fail(w, 409, errors.New("请等待自己的发言或投票回合"))
 		return
 	}
@@ -623,6 +635,9 @@ func fail(w http.ResponseWriter, status int, err error) {
 	}
 	if errors.Is(err, game.ErrNotOwner) || errors.Is(err, game.ErrHostOnly) || errors.Is(err, game.ErrNotMember) {
 		status = http.StatusForbidden
+	}
+	if errors.Is(err, game.ErrPlaybackPending) || errors.Is(err, game.ErrStalePlayback) {
+		status = http.StatusConflict
 	}
 	body := map[string]string{"error": err.Error()}
 	if errors.Is(err, game.ErrPasswordRequired) || errors.Is(err, game.ErrInvalidPassword) {

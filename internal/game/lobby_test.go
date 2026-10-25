@@ -40,11 +40,13 @@ func TestLobbyReadinessAndRosterChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	friend.ServerNow = 0
 	before, _ := json.Marshal(friend)
 	if _, err = m.Start(id, "host"); err == nil || !strings.Contains(err.Error(), "2号新一") {
 		t.Fatal("start must name the unready player")
 	}
 	after, _ := m.View(id, "friend")
+	after.ServerNow = 0
 	raw, _ := json.Marshal(after)
 	if string(before) != string(raw) {
 		t.Fatal("rejected start changed the room")

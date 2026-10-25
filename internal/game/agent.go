@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,21 +37,23 @@ func (m *Manager) acquireAgent(id, uid string, human bool) (func(), error) {
 	r.AgentActive = true
 	r.Version++
 	m.notifyLocked(id)
+	var once sync.Once
 	return func() {
-		m.mu.Lock()
-		delete(m.agentRooms, id)
-		if current := m.rooms[id]; current != nil {
-			current.AgentActive = false
-			if current.Game != nil && current.Game.Phase != "finished" {
-				current.Game.Deadline = time.Now().Add(60 * time.Second).UnixMilli()
+		once.Do(func() {
+			m.mu.Lock()
+			delete(m.agentRooms, id)
+			if current := m.rooms[id]; current != nil {
+				current.AgentActive = false
+				before := backup(current)
+				if err := m.commitLocked(current, before); err != nil {
+					slog.Error("save host conversation release", "error", err)
+					// The lease is transient: a failed durable clock update must not
+					// leave subscribers believing the voice connection is still held.
+					m.notifyLocked(id)
+				}
 			}
-			current.Version++
-			if err := m.persistLocked(current); err != nil {
-				slog.Error("save host conversation deadline", "error", err)
-			}
-			m.notifyLocked(id)
-		}
-		m.mu.Unlock()
+			m.mu.Unlock()
+		})
 	}, nil
 }
 
@@ -217,6 +220,9 @@ func (m *Manager) SubmitAIBatch(id, uid, batch string, actions []AIAction) error
 	if r == nil || member(r, uid) == nil || !m.agentRooms[id] {
 		return errors.New("主持会话已结束")
 	}
+	if err := requireAction(r); err != nil {
+		return err
+	}
 	if r.Game == nil || batchID(r.Game) != batch {
 		return errors.New("AI任务已经变化，请读取新的任务组")
 	}
@@ -275,7 +281,7 @@ func (m *Manager) PendingAgentTurns() []AgentTurn {
 	defer m.mu.Unlock()
 	turns := []AgentTurn{}
 	for _, r := range m.rooms {
-		if m.agentRooms[r.ID] || aiBatch(r.Game) == nil {
+		if m.agentRooms[r.ID] || requireAction(r) != nil || aiBatch(r.Game) == nil {
 			continue
 		}
 		for _, p := range roomPlayers(r) {
@@ -303,6 +309,9 @@ func VoiceTurnAllowed(view View) bool {
 	}
 	if view.Phase == "waiting" || view.Phase == "finished" {
 		return view.IsHost
+	}
+	if view.Action != nil && view.Action.State != "active" {
+		return false
 	}
 	if !player.Alive {
 		return false

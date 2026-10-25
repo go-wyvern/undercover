@@ -34,6 +34,7 @@ func TestAutomaticLinxTurnNarratesOneCommittedPlayerBeforeTheNext(t *testing.T) 
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	ackManagerPlayback(t, a.rooms, "room-1", "u")
 	if _, err = a.rooms.Speak("room-1", "u", "生活里经常可以见到这样的东西。", nil); err != nil {
 		t.Fatal(err)
 	}

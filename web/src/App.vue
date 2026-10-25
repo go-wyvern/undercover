@@ -43,6 +43,7 @@ import LobbyControls from './components/LobbyControls.vue'
 import { api, ApiError } from './api'
 import { usePushToTalk } from './composables/usePushToTalk'
 import { useNarration } from './composables/useNarration'
+import { playbackReadyResult, pendingPlaybackLogs } from './composables/playbackGate'
 import { canStartVoice, voiceTurnAllowed } from './composables/voiceTurn'
 import { seatPosition as relativeSeatPosition, tableCardPosition as relativeCardPosition } from './composables/tableLayout'
 import type { AccountInfo, AudioCue, Config, GameLog, Player, RoomSummary, RoomView, User } from './types'
@@ -78,6 +79,11 @@ const pcm = ref<Uint8Array | null>(null)
 const selectedVote = ref('')
 const peek = ref(false)
 const now = ref(Date.now())
+const clockOffset = ref(0)
+const playedLiveLogs = new Set<string>()
+const textWindows = new Set<string>()
+let acknowledging = ''
+let retryPlaybackAt = 0
 const reconnecting = ref(false)
 const transcript = ref<HTMLElement | null>(null)
 let pendingRoom = ''
@@ -155,10 +161,16 @@ function rememberCue(cue: AudioCue | null) {
   if (cue?.logId) heardLogs.value = new Set([...heardLogs.value, cue.logId])
 }
 watch(audibleCue, rememberCue)
+watch(narration.completedLiveLog, (log) => {
+  if (log) { playedLiveLogs.add(log.id); for (const cue of log.audioCues || []) if (cue.logId) playedLiveLogs.add(cue.logId) }
+  syncPlaybackGate()
+})
+watch(narration.enabled, () => syncPlaybackGate())
 watch(narration.completedLog, (log) => {
   if (!log) return
   const ids = log.audioCues?.flatMap(cue => cue.logId ? [cue.logId] : []) || []
   heardLogs.value = new Set([...heardLogs.value, log.id, ...ids])
+  if (narration.replaying.value) syncPlaybackGate()
 })
 const visibleLogs = computed(() => {
   const visible: GameLog[] = []
@@ -182,7 +194,47 @@ function publicLogText(log: GameLog) {
   return log.source === 'linx_agent' && log.audioCues?.some(c => c.playerId) ? '本轮主持语音 · 点击右侧重听' : log.text
 }
 
+async function confirmPlayback(result: 'played' | 'muted' | 'unavailable') {
+  const value = room.value
+  const gate = value?.action
+  if (!value || !gate?.required || gate.ready || gate.state !== 'waiting_playback' || acknowledging === gate.id) return
+  acknowledging = gate.id
+  const sentAt = Date.now()
+  if (result !== 'played') {
+    textWindows.add(gate.id)
+    narration.cancel()
+    heardLogs.value = new Set([...heardLogs.value, ...value.logs.map(log => log.id)])
+  }
+  try {
+    const updated = await api<RoomView>(`/api/rooms/${encodeURIComponent(value.id)}/playback-ready`, {
+      turnId: gate.id, throughLogId: gate.boundaryId, result,
+    })
+    if (room.value?.id === value.id) {
+      updateRoom(updated)
+      if (updated.serverNow) clockOffset.value = updated.serverNow - (sentAt + Date.now()) / 2
+    }
+  } catch (error) {
+    retryPlaybackAt = Date.now() + 3000
+    if (!(error instanceof ApiError && error.status === 409)) notify((error as Error).message)
+  } finally { if (acknowledging === gate.id) acknowledging = '' }
+}
+function syncPlaybackGate() {
+  const value = room.value
+  const gate = value?.action
+  if (!value || !gate) return
+  if (gate.textOnly && !textWindows.has(gate.id)) {
+    textWindows.add(gate.id)
+    narration.cancel()
+    heardLogs.value = new Set([...heardLogs.value, ...value.logs.map(log => log.id)])
+  }
+  if (gate.state !== 'waiting_playback' || !gate.required || gate.ready || Date.now() < retryPlaybackAt) return
+  const result = textWindows.has(gate.id) ? 'unavailable' : playbackReadyResult(gate, narration.enabled.value, playedLiveLogs)
+  if (result) { void confirmPlayback(result); return }
+  if (!narration.replaying.value || narration.state.value === 'idle')
+    narration.enqueue(value.id, pendingPlaybackLogs(value, playedLiveLogs), config.value.voiceConfigured)
+}
 function stopPlayback() {
+  if (room.value?.action?.required && room.value.action.state === 'waiting_playback') void confirmPlayback('unavailable')
   heardLogs.value = new Set([...heardLogs.value, ...(room.value?.logs.filter(l => l.kind === 'speech').map(l => l.id) || [])])
   voice.cancel()
   narration.cancel()
@@ -206,14 +258,14 @@ const speaker = computed(() =>
 const myTurn = computed(
   () =>
     !!room.value &&
-    ['speaking', 'tiebreak'].includes(room.value.phase) &&
+    ['speaking', 'tiebreak'].includes(room.value.phase) && room.value.action?.state !== 'waiting_playback' &&
     room.value.currentPlayerId === room.value.myPlayerId,
 )
 const canVote = computed(
-  () => room.value?.phase === 'voting' && me.value?.alive && !me.value.hasVoted && !listeningToPlayers.value,
+  () => room.value?.phase === 'voting' && room.value.action?.state !== 'waiting_playback' && !room.value.agentActive && me.value?.alive && !me.value.hasVoted && !listeningToPlayers.value,
 )
 const secondsLeft = computed(() =>
-  room.value?.deadline ? Math.max(0, Math.ceil((room.value.deadline - now.value) / 1000)) : 0,
+  room.value?.deadline ? Math.max(0, Math.ceil((room.value.deadline - now.value - clockOffset.value) / 1000)) : 0,
 )
 const seats = computed(() =>
   Array.from({ length: room.value?.capacity || 4 }, (_, i) => ({
@@ -237,6 +289,7 @@ const phaseHint = computed(() => {
   if (!room.value) return ''
   if (audibleCue.value?.playerId) return `正在听 ${audibleCue.value.seat} 号发言，留意这句话里的线索`
   if (listeningToPlayers.value) return 'AI 玩家已准备好描述，正在等待语音播报'
+  if (room.value.action?.state === 'waiting_playback') return room.value.action.ready ? '收听已完成，等待其他玩家或主持处理结束' : '正在收听前置播报，完成后才开始行动倒计时'
   if (room.value.phase === 'waiting' && room.value.startBlockReason) return room.value.startBlockReason
   if (room.value.phase === 'waiting' && !room.value.autoFillAI) return '这一桌已坐满，等房主开始游戏'
   if (room.value.phase === 'waiting')
@@ -262,7 +315,7 @@ const turnProgress = computed(() => {
   if (r.phase === 'voting') return 80
   return 25 + ((speaker.value?.seat || 1) / r.capacity) * 40
 })
-const playbackPending = computed(() => narration.enabled.value &&
+const playbackPending = computed(() => !room.value?.action?.required && narration.enabled.value &&
   (narration.queuedCount.value > 0 || narration.state.value === 'loading' || narration.state.value === 'playing'))
 const canRecord = computed(() => {
   if (!config.value.voiceConfigured || busy.value) return false
@@ -277,6 +330,7 @@ const voiceWaitText = computed(() => {
   }
   const value = room.value
   if (!value) return '请先入座'
+  if (value.action?.state === 'waiting_playback') return value.action.ready ? '等待开放行动' : '请先完成前置收听'
   if (value.agentActive) return '主持正在处理，请稍候'
   if (value.phase === 'dealing') return '正在发牌'
   if (!voiceTurnAllowed(value)) {
@@ -355,14 +409,18 @@ function updateRoom(value: RoomView, initial = false) {
   if (room.value?.id === value.id && value.version < room.value.version) return
   const previous = room.value
   now.value = Date.now()
+  if (initial) clockOffset.value = value.serverNow ? value.serverNow - now.value : 0
   if (initial) {
+    playedLiveLogs.clear()
+    textWindows.clear()
     knownLogs = new Set(value.logs.map((log) => log.id))
-    historicalLogs = new Set(knownLogs)
-    heardLogs.value = new Set(knownLogs)
+    const pending = new Set(value.action?.state === 'waiting_playback' && value.action.required && !value.action.ready ? value.action.logIds : [])
+    historicalLogs = new Set([...knownLogs].filter(id => !pending.has(id)))
+    heardLogs.value = new Set(historicalLogs)
     narration.cancel()
   }
   if (previous?.gameId !== value.gameId) {
-    if (!initial) {historicalLogs.clear(); heardLogs.value = new Set()}
+    if (!initial) {historicalLogs.clear(); heardLogs.value = new Set(); playedLiveLogs.clear(); textWindows.clear()}
     narration.cancel()
     peek.value = false
     selectedVote.value = ''
@@ -391,6 +449,7 @@ function updateRoom(value: RoomView, initial = false) {
       config.value.voiceConfigured,
     )
   }
+  syncPlaybackGate()
   void nextTick(() => {
     if (transcript.value) transcript.value.scrollTop = transcript.value.scrollHeight
   })
@@ -604,6 +663,10 @@ async function returnToLobby(message = '') {
   selectedVote.value = ''
   draft.value = ''
   pcm.value = null
+  playedLiveLogs.clear()
+  textWindows.clear()
+  acknowledging = ''
+  retryPlaybackAt = 0
   knownLogs.clear()
   historicalLogs.clear()
   heardLogs.value = new Set()
@@ -679,6 +742,7 @@ onMounted(() => {
   }, 5000)
   clockTimer = setInterval(() => {
     now.value = Date.now()
+    syncPlaybackGate()
   }, 1000)
   document.addEventListener('keydown', keydown)
   document.addEventListener('visibilitychange', visibilityChanged)
@@ -906,6 +970,11 @@ onUnmounted(() => {
             <RotateCcw :size="14" />重听上一条
           </button>
         </section>
+        <section v-if="room.action?.state === 'waiting_playback'" class="playback-wait-bar" role="status">
+          <Headphones :size="19" />
+          <div><b>{{ room.action.ready ? '收听已完成，等待开放行动' : '先听完，再开始计时' }}</b><p>前置播报完成后，服务端会开放发言或投票，并开始 60 秒倒计时。</p></div>
+          <button v-if="room.action.required && !room.action.ready" class="button secondary" @click="confirmPlayback('unavailable')">改用文字参与</button>
+        </section>
         <div class="game-layout">
           <section class="table-panel" :class="room.theme">
             <div class="table-meta">
@@ -914,7 +983,7 @@ onUnmounted(() => {
                   room.round ? `第 ${String(room.round).padStart(2, '0')} 轮` : '准备开局'
                 }}</span
               ><span class="table-format">{{ room.capacity - 1 }} 平民 / 1 卧底</span
-              ><span v-if="room.deadline && room.phase !== 'dealing'" class="turn-clock"
+              ><span v-if="room.deadline && room.phase !== 'dealing' && !room.agentActive" class="turn-clock"
                 ><Clock3 :size="14" />{{ secondsLeft }}s</span
               >
             </div>
