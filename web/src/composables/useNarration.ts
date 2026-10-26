@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { cueAt, logCue } from './audioCues.ts'
 import type { AudioCue, GameLog } from '../types'
 
-type Item = { room: string; log: GameLog; linx: boolean; blob?: Blob }
+type Item = { room: string; log: GameLog; linx: boolean; blob?: Blob; replay?: boolean }
 type State = 'idle' | 'loading' | 'playing' | 'blocked' | 'error'
 
 export function spokenText(log: GameLog) {
@@ -18,6 +18,8 @@ export function useNarration(onError: (text: string) => void) {
   const activeLog = ref('')
   const activeCue = ref<AudioCue | null>(null)
   const completedLog = ref<GameLog | null>(null)
+  const completedLiveLog = ref<GameLog | null>(null)
+  const replaying = ref(false)
   const current = ref<GameLog | null>(null)
   const state = ref<State>('idle')
   const playbackSource = ref<'linx' | 'recording' | 'browser' | ''>('')
@@ -52,6 +54,7 @@ export function useNarration(onError: (text: string) => void) {
   }
   function cancel() {
     generation++
+    replaying.value = false
     queue = []
     seen.clear()
     queuedCount.value = 0
@@ -181,6 +184,7 @@ export function useNarration(onError: (text: string) => void) {
     busy = true
     const run = generation
     const next = queue[0]!
+    replaying.value = !!next.replay
     activeLog.value = next.log.id
     current.value = next.log
     state.value = 'loading'
@@ -223,6 +227,7 @@ export function useNarration(onError: (text: string) => void) {
         busy = false
         if (completed) {
           completedLog.value = next.log
+          if (!next.replay) completedLiveLog.value = next.log
           queue.shift()
           queuedCount.value = queue.length
           activeLog.value = ''
@@ -246,9 +251,9 @@ export function useNarration(onError: (text: string) => void) {
   }
   function replay(room: string, log: GameLog, linx: boolean) {
     cancel()
-    queue.push({ room, log, linx })
+    queue.push({ room, log, linx, replay: true })
     queuedCount.value = 1
     activate()
   }
-  return { enabled, activeLog, activeCue, completedLog, current, state, playbackSource, fallback, queuedCount, activate, toggle, cancel, enqueue, replay }
+  return { completedLiveLog, replaying, enabled, activeLog, activeCue, completedLog, current, state, playbackSource, fallback, queuedCount, activate, toggle, cancel, enqueue, replay }
 }

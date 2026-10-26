@@ -55,7 +55,19 @@ export interface RoomSummary {
   phase: Phase
   players: Player[]
 }
+export interface ActionWindow {
+  id: string
+  boundaryId: string
+  logIds: string[]
+  state: 'waiting_playback' | 'active'
+  waitUntil: number
+  required: boolean
+  ready: boolean
+  textOnly: boolean
+}
 export interface RoomView extends RoomSummary {
+  action?: ActionWindow
+  serverNow?: number
   lobbyPlayers?: Player[]
   canStart: boolean
   startBlockReason?: string

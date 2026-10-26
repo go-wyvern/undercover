@@ -76,7 +76,8 @@ func waitSpeaking(t *testing.T, c *client, id string) game.View {
 	for time.Now().Before(deadline) {
 		v := c.view(t, id)
 		if v.Phase == "speaking" {
-			return v
+			c.playbackReady(t, id)
+			return c.view(t, id)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -128,11 +129,15 @@ func TestEmbeddedFrontendAndProtectedGameFlow(t *testing.T) {
 	}
 	clients[1].post(t, "/api/rooms/room-1/speech", map[string]string{"text": "不应该轮到我。"}, 400).Body.Close()
 	for _, other := range clients {
+		other.playbackReady(t, "room-1")
 		other.post(t, "/api/rooms/room-1/speech", map[string]string{"text": "它在日常生活中非常常见。"}, 200).Body.Close()
 	}
 	v = c.view(t, "room-1")
 	if v.Phase != "voting" {
 		t.Fatal("description phase did not end")
+	}
+	for _, player := range clients {
+		player.playbackReady(t, "room-1")
 	}
 	c.post(t, "/api/rooms/room-1/vote", map[string]string{"targetId": v.MyPlayerID}, 400).Body.Close()
 	target := v.Players[3].ID

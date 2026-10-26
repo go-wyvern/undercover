@@ -19,6 +19,7 @@ func TestRecognizedSpeechStaysPrivateSurvivesReloadAndCannotTimeoutIntoSkip(t *t
 	m.mu.Lock()
 	m.rooms["room-1"].Game.Begin()
 	m.mu.Unlock()
+	acknowledgePlayback(t, m, "room-1")
 	text := "这是在水面下面进行的活动。"
 	pcm := bytes.Repeat([]byte{7, 0}, 320)
 	if err := m.RememberSpeech("room-1", "host", text, pcm); err != nil {
@@ -80,6 +81,9 @@ func TestAnEmptyHumanTurnStillExpiresWithAnExplicitTimeoutReason(t *testing.T) {
 	m.mu.Lock()
 	g := m.rooms["room-1"].Game
 	g.Begin()
+	m.mu.Unlock()
+	acknowledgePlayback(t, m, "room-1")
+	m.mu.Lock()
 	g.Deadline = time.Now().Add(-time.Minute).UnixMilli()
 	m.mu.Unlock()
 	m.tick()

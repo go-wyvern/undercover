@@ -47,10 +47,18 @@ func TestGameToolsRespectActorAndDriveAIWithoutPublicSecrets(t *testing.T) {
 	if _, err = other(context.Background(), "game.submit_description", json.RawMessage(`{"text":"还没有轮到我。"}`)); err == nil {
 		t.Fatal("out-of-turn human used speech tool")
 	}
+	release()
+	ackManagerPlayback(t, a.rooms, "room-1", "host")
 	if _, err = handler(context.Background(), "game.submit_description", json.RawMessage(`{"text":"它在日常生活里很常见。"}`)); err != nil {
 		t.Fatal(err)
 	}
+	ackManagerPlayback(t, a.rooms, "room-1", "other")
 	_, _ = a.rooms.Skip("room-1", "other")
+	release, err = a.rooms.AcquireAgent("room-1", "host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
 	batch, err := a.rooms.NextAIBatch("room-1", "host")
 	if err != nil || batch == nil {
 		t.Fatal("missing AI task")
@@ -120,6 +128,7 @@ func TestVoiceDescriptionUsesRecognizedOriginalAndKeepsItInThisSession(t *testin
 	if otherState.(map[string]any)["currentUtterance"] != "" {
 		t.Fatal("utterance leaked to another conversation")
 	}
+	ackManagerPlayback(t, a.rooms, "room-1", "host")
 	_, err = handler(context.Background(), "game.submit_description", json.RawMessage(`{"text":"模型改写的另一句话。"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -159,6 +168,7 @@ func TestVoiceSkipRequiresAnExplicitRequest(t *testing.T) {
 	if state.CurrentPlayerID != state.MyPlayerID {
 		t.Fatal("unauthorized skip moved the turn")
 	}
+	ackManagerPlayback(t, a.rooms, "room-1", "host")
 	input = "跳过"
 	if _, err = handler(context.Background(), "game.skip", json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)

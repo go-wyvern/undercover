@@ -6,6 +6,7 @@ export function voiceTurnAllowed(room: RoomView | null) {
   const player = room.players.find(player => player.id === room.myPlayerId)
   if (!player || player.bot) return false
   if (room.phase === 'waiting' || room.phase === 'finished') return room.isHost
+  if (room.action?.state === 'waiting_playback') return false
   if (!player.alive) return false
   if (room.phase === 'speaking' || room.phase === 'tiebreak')
     return room.currentPlayerId === player.id

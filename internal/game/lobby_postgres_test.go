@@ -92,4 +92,45 @@ func TestPostgresLobbyConfigurationAndReadinessRecovery(t *testing.T) {
 	if _, err = restarted.Start(v.ID, "host"); err != nil {
 		t.Fatal("recovered room could not start", err)
 	}
+	restarted.tickAt(time.Now().Add(3 * time.Second))
+	waiting, _ := restarted.View(v.ID, "host")
+	if waiting.Action == nil || waiting.Deadline != 0 {
+		t.Fatal("missing persisted playback window")
+	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = storage.OpenPostgres(ctx, u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	restarted, err = NewManager(store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, _ = restarted.View(v.ID, "host")
+	if recovered.Action.ID != waiting.Action.ID || recovered.Action.WaitUntil != waiting.Action.WaitUntil || recovered.Deadline != 0 {
+		t.Fatal("PostgreSQL restart changed playback gate")
+	}
+	active, err := restarted.PlaybackReady(v.ID, "host", waiting.Action.ID, waiting.Action.BoundaryID, "muted")
+	if err != nil || active.Action.State != "active" {
+		t.Fatal("recovered gate could not activate", err)
+	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = storage.OpenPostgres(ctx, u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	restarted, err = NewManager(store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, _ = restarted.View(v.ID, "host")
+	if recovered.Deadline != active.Deadline {
+		t.Fatal("PostgreSQL restart reset active timer")
+	}
 }
